@@ -8,8 +8,8 @@
 
 This action wraps
 [`@zerowiggliness/another-release-please`](https://github.com/ZeroWiggliness/another-release-please)
-so you can create release pull requests, calculate the next version, and
-publish releases from GitHub Actions.
+so you can create release pull requests, calculate the next version, and publish
+releases from GitHub Actions.
 
 ## What It Does
 
@@ -48,12 +48,10 @@ permissions:
   pull-requests: write
 ```
 
-If you need downstream workflows to trigger from tags, releases, or pull
-request updates created by this action, use a PAT instead of the default
-`GITHUB_TOKEN`.
+If you need downstream workflows to trigger from tags, releases, or pull request
+updates created by this action, use a PAT instead of the default `GITHUB_TOKEN`.
 
-Your repository settings must also allow GitHub Actions to create pull
-requests.
+Your repository settings must also allow GitHub Actions to create pull requests.
 
 ### First-run note
 
@@ -137,8 +135,9 @@ jobs:
 ```
 
 If you want to match this repository's own CI even more closely during local
-iteration, the checked-in workflow uses `ZeroWiggliness/another-release-please-action@master`.
-For consumers of the action, use a tagged version such as `@v1`.
+iteration, the checked-in workflow uses
+`ZeroWiggliness/another-release-please-action@master`. For consumers of the
+action, use a tagged version such as `@v1`.
 
 ## Common Usage
 
@@ -192,37 +191,37 @@ steps:
 
 ## Inputs
 
-| Input | Required | Default | Description |
-| --- | --- | --- | --- |
-| `command` | No | `release,release-pr` | Comma-separated list of commands to run in order: `release-pr`, `calculate-next`, `release` |
-| `provider` | No | `github` | Version control provider |
-| `token` | No | `${{ github.token }}` | GitHub token used to access the repository |
-| `repository` | No | `${{ github.repository }}` | Repository in `owner/repo` format |
-| `target-branch` | No | `${{ github.event.repository.default_branch }}` | Branch to analyze and use as the release PR target |
-| `pr-branch` | No | _(defaults to `target-branch`)_ | Pull request destination branch when it differs from the analyzed branch |
-| `prerelease` | No | `false` | Enable prerelease version calculation |
-| `prerelease-calculate-next` | No | _(inherits `prerelease`)_ | `calculate-next` only: override prerelease calculation behavior |
-| `dry-run` | No | `false` | Run without making provider changes |
-| `debug` | No | `false` | Enable detailed debug logging |
-| `versioner` | No | _(none)_ | Override the versioning strategy |
-| `version-prefix` | No | `v` | Prefix used for tags, such as `v1.2.3` |
-| `issue-url-template` | No | provider-specific default | URL template for issue references. Use `{id}` as the placeholder |
-| `type` | No | _(none)_ | Override the manifest type for every package |
-| `use-file-system` | No | `true` | Scan and read files from the local checkout instead of provider APIs |
-| `include-chores` | No | `false` | Include `chore:` commits in release eligibility and bump calculation |
-| `update-all-versions` | No | `false` | Update every manifest even when no changed files were detected under that manifest path |
-| `write-local` | No | `false` | `calculate-next` only: write updated version files to the local filesystem instead of committing them |
+| Input                       | Required | Default                                         | Description                                                                                           |
+| --------------------------- | -------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `command`                   | No       | `release,release-pr`                            | Comma-separated list of commands to run in order: `release-pr`, `calculate-next`, `release`           |
+| `provider`                  | No       | `github`                                        | Version control provider                                                                              |
+| `token`                     | No       | `${{ github.token }}`                           | GitHub token used to access the repository                                                            |
+| `repository`                | No       | `${{ github.repository }}`                      | Repository in `owner/repo` format                                                                     |
+| `target-branch`             | No       | `${{ github.event.repository.default_branch }}` | Branch to analyze and use as the release PR target                                                    |
+| `pr-branch`                 | No       | _(defaults to `target-branch`)_                 | Pull request destination branch when it differs from the analyzed branch                              |
+| `prerelease`                | No       | `false`                                         | Enable prerelease version calculation                                                                 |
+| `prerelease-calculate-next` | No       | _(inherits `prerelease`)_                       | `calculate-next` only: override prerelease calculation behavior                                       |
+| `dry-run`                   | No       | `false`                                         | Run without making provider changes                                                                   |
+| `debug`                     | No       | `false`                                         | Enable detailed debug logging                                                                         |
+| `versioner`                 | No       | _(none)_                                        | Override the versioning strategy                                                                      |
+| `version-prefix`            | No       | `v`                                             | Prefix used for tags, such as `v1.2.3`                                                                |
+| `issue-url-template`        | No       | provider-specific default                       | URL template for issue references. Use `{id}` as the placeholder                                      |
+| `type`                      | No       | _(none)_                                        | Override the manifest type for every package                                                          |
+| `use-file-system`           | No       | `true`                                          | Scan and read files from the local checkout instead of provider APIs                                  |
+| `include-chores`            | No       | `false`                                         | Include `chore:` commits in release eligibility and bump calculation                                  |
+| `update-all-versions`       | No       | `false`                                         | Update every manifest even when no changed files were detected under that manifest path               |
+| `write-local`               | No       | `false`                                         | `calculate-next` only: write updated version files to the local filesystem instead of committing them |
 
 ## Outputs
 
-| Output | Description |
-| --- | --- |
-| `created` | `'true'` if the `release` command created a release |
-| `created-pr` | `'true'` if the `release-pr` command created or updated a pull request |
-| `current-version` | Current version from the last version-aware command |
-| `next-version` | Next version from the last version-aware command |
-| `manifest-current-version` | JSON array of current manifest versions collected in execution order |
-| `manifest-next-version` | JSON array of next manifest versions collected in execution order |
+| Output                     | Description                                                            |
+| -------------------------- | ---------------------------------------------------------------------- |
+| `created`                  | `'true'` if the `release` command created a release                    |
+| `created-pr`               | `'true'` if the `release-pr` command created or updated a pull request |
+| `current-version`          | Current version from the last version-aware command                    |
+| `next-version`             | Next version from the last version-aware command                       |
+| `manifest-current-version` | JSON array of current manifest versions collected in execution order   |
+| `manifest-next-version`    | JSON array of next manifest versions collected in execution order      |
 
 Each manifest array entry is also exposed as an indexed output, for example
 `manifest-current-version-0` and `manifest-next-version-0`.
@@ -295,6 +294,5 @@ yarn bundle
 > [!IMPORTANT]
 >
 > The `dist/` folder is generated output and must be committed alongside any
-> source changes. The
-> [`check-dist.yml`](./.github/workflows/check-dist.yml) workflow fails when
-> `dist/` is out of sync with `src/`.
+> source changes. The [`check-dist.yml`](./.github/workflows/check-dist.yml)
+> workflow fails when `dist/` is out of sync with `src/`.

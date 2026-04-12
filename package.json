@@ -39,7 +39,7 @@
   "license": "MIT",
   "dependencies": {
     "@actions/core": "^3.0.0",
-    "@zerowiggliness/another-release-please": "^0.1.4"
+    "@zerowiggliness/another-release-please": "^0.1.0"
   },
   "devDependencies": {
     "@eslint/compat": "^2.0.5",

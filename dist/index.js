@@ -28264,9 +28264,10 @@ const BREAKING_CHANGE_LINE_REGEX = /^BREAKING CHANGE:\s*(.+)$/;
 async function expandCommits(commits) {
     const result = [];
     for (const commit of commits) {
-        const rawLines = (commit.message || commit.title).split('\n').map(l => l.trim()).filter(l => l.length > 0);
-        // Reject expansion if the first line is not a conventional commit — drop the commit entirely
+        const rawLines = commit.message.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        // If the first line is not a conventional commit, pass through as-is
         if (rawLines.length === 0 || !CONVENTIONAL_COMMIT_LINE_REGEX.test(rawLines[0])) {
+            result.push(commit);
             continue;
         }
         let breakingText;
@@ -28288,6 +28289,7 @@ async function expandCommits(commits) {
         }
         const conventionalLines = candidateLines.filter(l => CONVENTIONAL_COMMIT_LINE_REGEX.test(l));
         if (conventionalLines.length === 0) {
+            debug(`No conventional commit lines found in commit ${commit.sha.substring(0, 8)} — passing through unchanged`);
             result.push(commit);
             continue;
         }
@@ -62191,9 +62193,8 @@ function requireSideChannelList () {
 				}
 			},
 			'delete': function (key) {
-				var root = $o && $o.next;
 				var deletedNode = listDelete($o, key);
-				if (deletedNode && root && root === deletedNode) {
+				if (deletedNode && $o && !$o.next) {
 					$o = void undefined;
 				}
 				return !!deletedNode;
@@ -62215,7 +62216,6 @@ function requireSideChannelList () {
 				listSet(/** @type {NonNullable<typeof $o>} */ ($o), key, value);
 			}
 		};
-		// @ts-expect-error TODO: figure out why this is erroring
 		return channel;
 	};
 	return sideChannelList;
@@ -63286,10 +63286,10 @@ function requireParse$1 () {
 	    var limit = options.parameterLimit === Infinity ? void undefined : options.parameterLimit;
 	    var parts = cleanStr.split(
 	        options.delimiter,
-	        options.throwOnLimitExceeded ? limit + 1 : limit
+	        options.throwOnLimitExceeded && typeof limit !== 'undefined' ? limit + 1 : limit
 	    );
 
-	    if (options.throwOnLimitExceeded && parts.length > limit) {
+	    if (options.throwOnLimitExceeded && typeof limit !== 'undefined' && parts.length > limit) {
 	        throw new RangeError('Parameter limit exceeded. Only ' + limit + ' parameter' + (limit === 1 ? '' : 's') + ' allowed.');
 	    }
 
