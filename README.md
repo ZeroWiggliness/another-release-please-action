@@ -6,52 +6,143 @@
 ![CodeQL](https://github.com/ZeroWiggliness/another-release-please-action/actions/workflows/codeql-analysis.yml/badge.svg)
 ![Coverage](./badges/coverage.svg)
 
-A GitHub Action that wraps
+This action wraps
 [`@zerowiggliness/another-release-please`](https://github.com/ZeroWiggliness/another-release-please)
-to automate release pull requests, version calculation, and releases directly
-from your GitHub Actions workflows.
+so you can create release pull requests, calculate the next version, and
+publish releases from GitHub Actions.
 
-## Permissions
+## What It Does
 
-For the default GITHUB_TOKEN the following CI/CD you need the following. It
-recommened to make your own token though as the default GITHUB_TOKEN will not
-trigger other workflows. Only a PAT will.
+The action supports three commands:
 
-permissions: 
+- `release-pr`: create or update the autorelease pull request
+- `calculate-next`: calculate the next version and optionally write version
+  updates locally
+- `release`: publish a GitHub release after the autorelease pull request has
+  been merged
+
+The default `command` value is `release,release-pr`, which means:
+
+1. publish the release if a release PR was already merged
+2. open or refresh the next release PR
+
+## Prerequisites
+
+### Repository checkout
+
+By default this action uses the local filesystem (`use-file-system: true`), so
+your workflow should check out the repository before running the action.
+
+```yaml
+- uses: actions/checkout@v4
+```
+
+### Token permissions
+
+The default `GITHUB_TOKEN` works for most repositories as long as the workflow
+has:
+
+```yaml
+permissions:
+  contents: write
+  pull-requests: write
+```
+
+If you need downstream workflows to trigger from tags, releases, or pull
+request updates created by this action, use a PAT instead of the default
+`GITHUB_TOKEN`.
+
+Your repository settings must also allow GitHub Actions to create pull
+requests.
+
+### First-run note
+
+If the initial setup fails with a fast-forward or branch update error, the most
+common cause is insufficient token permissions. In that case, fix the
+permissions, delete the generated autorelease branch, and run the workflow
+again.
+
+## Quickstart
+
+### 1. Add `.arp.config.json`
+
+Commit a `.arp.config.json` file at the repository root. For a repository like
+this one, a good starting point is:
+
+```json
+{
+  "provider": "github",
+  "release": {
+    "targetBranch": "master",
+    "prerelease": false,
+    "includeChores": false
+  },
+  "version": "v0.0.1",
+  "versionPrefix": "v",
+  "manifests": [
+    {
+      "path": ".",
+      "type": "node",
+      "version": "0.0.1"
+    }
+  ]
+}
+```
+
+This example is intentionally shaped like this repository:
+
+- `targetBranch: "master"` matches the branch used in this repo's workflow
+- `type: "node"` fits a repository whose versioned source of truth is a
+  `package.json`
+- top-level `version` keeps the tag form (`v0.0.1`), while the manifest version
+  stays unprefixed (`0.0.1`)
+
+Replace those versions with the current released version of your repository
+before turning the workflow on if you already have different versions.
+
+### 2. Add a workflow job
+
+This job mirrors how this repository runs the action on pushes to `master`:
+
+```yaml
+name: Release
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
   contents: write
   pull-requests: write
 
-Also your repository settings need to have "Allow GitHub Actions to create and approve pull requests" set to true.
+jobs:
+  another-release-please:
+    runs-on: ubuntu-latest
 
-IMPORTANT: Known issue, if you see a fast forward error the first time you intialize the repository this is often because of lack of permissions. You usually need to delete the (by default arp--main--main branch and then rerun).
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-## Commands
+      - name: Run another-release-please
+        id: arp
+        uses: ZeroWiggliness/another-release-please-action@v1
+        with:
+          command: release,release-pr
+          token: ${{ secrets.GITHUB_TOKEN }}
+          target-branch: master
 
-The `command` input accepts a comma-separated list of the following commands,
-executed in the order specified.
+      - name: Log outputs
+        run: echo '${{ toJSON(steps.arp.outputs) }}'
+```
 
-### `release-pr`
+If you want to match this repository's own CI even more closely during local
+iteration, the checked-in workflow uses `ZeroWiggliness/another-release-please-action@master`.
+For consumers of the action, use a tagged version such as `@v1`.
 
-Creates or updates a release pull request for your repository.
+## Common Usage
 
-### `calculate-next`
-
-Calculates the next version based on commits since the last release. Use the
-`write-local` input to write updated version files to the local filesystem
-instead of committing them to the branch.
-
-### `release`
-
-Creates a GitHub release from an existing release pull request that has been
-merged.
-
-## Usage
-
-### Default (create a release PR, then publish)
-
-The default command runs `release` followed by `release-pr` — it creates a
-GitHub release if a release PR was merged, then opens a new release PR for the
-next version.
+### Default flow
 
 ```yaml
 steps:
@@ -59,20 +150,7 @@ steps:
   - uses: ZeroWiggliness/another-release-please-action@v1
 ```
 
-### Full release cycle in a single step
-
-Run `release-pr` first to open the pull request, then `release` once it is
-merged:
-
-```yaml
-steps:
-  - uses: actions/checkout@v4
-  - uses: ZeroWiggliness/another-release-please-action@v1
-    with:
-      command: release-pr,release
-```
-
-### Create a release PR only
+### Create or refresh a release PR only
 
 ```yaml
 steps:
@@ -92,7 +170,17 @@ steps:
       command: release
 ```
 
-### Calculate the next version
+### Calculate the next version only
+
+```yaml
+steps:
+  - uses: actions/checkout@v4
+  - uses: ZeroWiggliness/another-release-please-action@v1
+    with:
+      command: calculate-next
+```
+
+### Calculate the next version and write version files locally
 
 ```yaml
 steps:
@@ -104,41 +192,42 @@ steps:
 
 ## Inputs
 
-| Input                       | Required | Default                    | Description                                                                                                     |
-| --------------------------- | -------- | -------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| Input                       | Required | Default                    | Description                                                                                                     |
-| ----------------------      | -------- | -------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `command`                   | No       | `release,release-pr`       | Comma-separated list of commands to run in order: `release-pr`, `calculate-next`, or `release`                  |
-| `provider`                  | No       | `github`                   | Version control provider to use                                                                                 |
-| `token`                     | No       | `${{ github.token }}`      | GitHub token used to interact with the repository                                                               |
-| `repository`                | No       | `${{ github.repository }}` | Repository in `owner/repository` format                                                                         |
-| `target-branch`             | No       | _(repository default)_     | Target branch for the release PR                                                                                |
-| `pr-branch`                 | No       | _(none)_                   | Destination branch for the pull request. Defaults to `target-branch` when not set                               |
-| `prerelease`                | No       | `false`                    | Calculate a prerelease version                                                                                  |
-| `prerelease-calculate-next` | No       | _(value of `prerelease`)_  | (`calculate-next` only) Calculate a prerelease version. Defaults to `prerelease` when not set                   |
-| `dry-run`                   | No       | `false`                    | Run without making any changes                                                                                  |
-| `debug`                     | No       | `false`                    | Enable detailed debug logging                                                                                   |
-| `versioner`                 | No       | _(none)_                   | Versioning strategy to use                                                                                      |
-| `version-prefix`            | No       | `v`                        | Prefix for version tags (e.g. `v` produces `v1.2.3`)                                                            |
-| `issue-url-template`        | No       | _(none)_                   | URL template for ticket references. Use `{id}` as the placeholder (e.g. `https://jira.example.com/browse/{id}`) |
-| `type`                      | No       | _(none)_                   | Override the manifest type for every package                                                                    |
-| `use-file-system`           | No       | `true`                     | Use the local filesystem to scan and read files instead of provider APIs                                        |
-| `include-chores`            | No       | `false`                    | Include `chore:` commits when determining release eligibility                                                   |
-| `update-all-versions`       | No       | `false`                    | Bump every package in the manifest even when no changed files were found                                        |
-| `write-local`               | No       | `false`                    | (`calculate-next` only) Write updated version files to the local filesystem instead of committing them          |
+| Input | Required | Default | Description |
+| --- | --- | --- | --- |
+| `command` | No | `release,release-pr` | Comma-separated list of commands to run in order: `release-pr`, `calculate-next`, `release` |
+| `provider` | No | `github` | Version control provider |
+| `token` | No | `${{ github.token }}` | GitHub token used to access the repository |
+| `repository` | No | `${{ github.repository }}` | Repository in `owner/repo` format |
+| `target-branch` | No | `${{ github.event.repository.default_branch }}` | Branch to analyze and use as the release PR target |
+| `pr-branch` | No | _(defaults to `target-branch`)_ | Pull request destination branch when it differs from the analyzed branch |
+| `prerelease` | No | `false` | Enable prerelease version calculation |
+| `prerelease-calculate-next` | No | _(inherits `prerelease`)_ | `calculate-next` only: override prerelease calculation behavior |
+| `dry-run` | No | `false` | Run without making provider changes |
+| `debug` | No | `false` | Enable detailed debug logging |
+| `versioner` | No | _(none)_ | Override the versioning strategy |
+| `version-prefix` | No | `v` | Prefix used for tags, such as `v1.2.3` |
+| `issue-url-template` | No | provider-specific default | URL template for issue references. Use `{id}` as the placeholder |
+| `type` | No | _(none)_ | Override the manifest type for every package |
+| `use-file-system` | No | `true` | Scan and read files from the local checkout instead of provider APIs |
+| `include-chores` | No | `false` | Include `chore:` commits in release eligibility and bump calculation |
+| `update-all-versions` | No | `false` | Update every manifest even when no changed files were detected under that manifest path |
+| `write-local` | No | `false` | `calculate-next` only: write updated version files to the local filesystem instead of committing them |
 
 ## Outputs
 
-| Output                     | Description                                                                                                                                                                                                                                                                             |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `created`                  | `'true'` if the `release` command created a release, `'false'` otherwise                                                                                                                                                                                                                |
-| `created-pr`               | `'true'` if the `release-pr` command created a pull request, `'false'` otherwise                                                                                                                                                                                                        |
-| `current-version`          | The current version at the time of the last version-aware command                                                                                                                                                                                                                       |
-| `next-version`             | The next version calculated by the last version-aware command                                                                                                                                                                                                                           |
-| `manifest-current-version` | JSON array of current versions collected from each version-aware command, in execution order (e.g. `["v1.0.0"]`). Empty (`[]`) when no version info is returned. Each entry is also available as an individual output: `manifest-current-version-0`, `manifest-current-version-1`, etc. |
-| `manifest-next-version`    | JSON array of next versions collected from each version-aware command, in execution order (e.g. `["v1.1.0"]`). Empty (`[]`) when no version info is returned. Each entry is also available as an individual output: `manifest-next-version-0`, `manifest-next-version-1`, etc.          |
+| Output | Description |
+| --- | --- |
+| `created` | `'true'` if the `release` command created a release |
+| `created-pr` | `'true'` if the `release-pr` command created or updated a pull request |
+| `current-version` | Current version from the last version-aware command |
+| `next-version` | Next version from the last version-aware command |
+| `manifest-current-version` | JSON array of current manifest versions collected in execution order |
+| `manifest-next-version` | JSON array of next manifest versions collected in execution order |
 
-Example — reading outputs in a subsequent step:
+Each manifest array entry is also exposed as an indexed output, for example
+`manifest-current-version-0` and `manifest-next-version-0`.
+
+Example:
 
 ```yaml
 steps:
@@ -147,7 +236,7 @@ steps:
     uses: ZeroWiggliness/another-release-please-action@v1
   - if: steps.arp.outputs.created == 'true'
     run: echo "Released ${{ steps.arp.outputs.current-version }}"
-  - name: Show all collected versions
+  - name: Show collected versions
     run: |
       echo "Current versions: ${{ steps.arp.outputs.manifest-current-version }}"
       echo "Next versions:    ${{ steps.arp.outputs.manifest-next-version }}"
@@ -155,13 +244,13 @@ steps:
       echo "Next version 0:    ${{ steps.arp.outputs.manifest-next-version-0 }}"
 ```
 
-## Initializing the Manifest
+## Bootstrap A Config File
 
-Before using this action for the first time you need to generate an
-`.arp.config.json` manifest. The `init-manifest` command is not exposed through
-this action — run it directly instead.
+If you want the library to generate a starter `.arp.config.json` for you, use
+the upstream CLI directly. The `init-manifest` command is not exposed through
+this action.
 
-**Using Docker (no local install required):**
+### Docker
 
 ```bash
 docker run --rm ghcr.io/zerowiggliness/another-release-please:latest \
@@ -171,40 +260,17 @@ docker run --rm ghcr.io/zerowiggliness/another-release-please:latest \
   init-manifest > .arp.config.json
 ```
 
-**Using yarn (local dev):**
+### From A Clone Of `another-release-please`
 
 ```bash
-yarn another-release-please \
+node ./dist/bin/arp.js \
   --provider github \
   --repository https://github.com/<owner>/<repository> \
   --token "$GITHUB_TOKEN" \
   init-manifest > .arp.config.json
 ```
 
-Commit the generated `.arp.config.json` to your repository before running the
-action.
-
-## Prerequisites
-
-### Token permissions
-
-The default `GITHUB_TOKEN` is used unless you provide a custom `token`. The
-token must have:
-
-- `contents: write` — to create tags and releases
-- `pull-requests: write` — to create or update release pull requests
-
-Example workflow-level permissions:
-
-```yaml
-permissions:
-  contents: write
-  pull-requests: write
-```
-
-### Node.js version
-
-This action requires Node.js 24 or later.
+Commit the generated file before enabling the workflow.
 
 ## Contributing
 
@@ -220,7 +286,7 @@ Run tests:
 yarn test
 ```
 
-Build the action (required after any changes to `src/`):
+Bundle the action after changing files in `src/`:
 
 ```bash
 yarn bundle
@@ -228,7 +294,7 @@ yarn bundle
 
 > [!IMPORTANT]
 >
-> The `dist/` folder contains generated JavaScript and must be committed
-> alongside any source changes. The
-> [`check-dist.yml`](./.github/workflows/check-dist.yml) workflow will fail if
+> The `dist/` folder is generated output and must be committed alongside any
+> source changes. The
+> [`check-dist.yml`](./.github/workflows/check-dist.yml) workflow fails when
 > `dist/` is out of sync with `src/`.
