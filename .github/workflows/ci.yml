@@ -1,0 +1,83 @@
+name: Continuous Integration
+
+on:
+  pull_request:
+    branches:
+      - master
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+  packages: read
+  pull-requests: write
+
+jobs:
+  test-typescript:
+    name: TypeScript Tests
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v6
+
+      - name: Auto Release
+        id: auto-release
+        uses: ZeroWiggliness/another-release-please-action@master
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+        with:
+          command: release, release-pr
+          token: ${{ github.token}}
+          target-branch: master
+          dry-run: false
+
+      - name: Log Auto Release outputs
+        if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+        run: echo '${{ toJSON(steps.auto-release.outputs) }}'
+
+      - name: Enable Corepack
+        id: corepack
+        run: corepack enable
+
+      - name: Setup Node.js
+        id: setup-node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: yarn
+
+      - name: Install Dependencies
+        id: yarn-install
+        run: yarn install --immutable
+
+      - name: Check Format
+        id: npm-format-check
+        run: yarn format:check
+
+      - name: Lint
+        id: npm-lint
+        run: yarn lint
+
+      - name: Test
+        id: npm-ci-test
+        run: yarn ci-test
+
+  test-action:
+    name: GitHub Actions Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@v6
+
+      - name: Test Local Action
+        id: test-action
+        uses: ./
+        with:
+          command: release-pr
+          dry-run: 'true'
