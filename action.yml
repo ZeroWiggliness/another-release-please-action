@@ -1,0 +1,126 @@
+name: Another Release Please
+description:
+  Creates or updates a release pull request using another-release-please
+author: ZeroWiggliness
+
+branding:
+  icon: git-pull-request
+  color: blue
+
+inputs:
+  command:
+    description: >-
+      Comma-separated list of commands to run in order: release-pr,
+      calculate-next, or release (e.g. "release,release-pr" runs release then
+      release-pr)
+    required: false
+    default: release,release-pr
+  provider:
+    description: Version control provider to use
+    required: false
+    default: github
+  token:
+    description: GitHub token used to interact with the repository
+    required: false
+    default: ${{ github.token }}
+  repository:
+    description: Repository in owner/repo format
+    required: false
+    default: ${{ github.repository }}
+  target-branch:
+    description:
+      Target branch for the release PR (defaults to the repository default
+      branch)
+    required: false
+    default: ${{ github.event.repository.default_branch }}
+  pr-branch:
+    description: >-
+      Destination branch for the pull request. Defaults to target-branch. Use
+      this for GitFlow-style setups where the analyzed branch and the PR
+      destination differ.
+    required: false
+  prerelease:
+    description: Calculate a prerelease version
+    required: false
+    default: 'false'
+  prerelease-calculate-next:
+    description: >-
+      Calculate a prerelease version for the calculate-next command. Defaults to
+      the value of the prerelease input when not set.
+    required: false
+  dry-run:
+    description: Run without making any changes
+    required: false
+    default: 'false'
+  debug:
+    description: Enable detailed debug logging
+    required: false
+    default: 'false'
+  versioner:
+    description: Versioning strategy to use
+    required: false
+  version-prefix:
+    description:
+      Prefix for version tags (e.g. "v" produces "v1.2.3"). Defaults to "v"
+    required: false
+  issue-url-template:
+    description: >-
+      URL template for issue/ticket references. Use {id} as the placeholder
+      (e.g. "https://jira.example.com/browse/{id}"). Default sets to provider
+      specific issue URL (e.g. GitHub issues)
+    required: false
+  type:
+    description: Override the manifest type for every package
+    required: false
+  use-file-system:
+    description: >-
+      Use the local filesystem to scan and read files instead of provider APIs.
+      Reduces API calls and can improve performance, but may not work in all
+      environments (e.g. some CI setups). Requires code to be checked out.
+    required: false
+    default: 'true'
+  include-chores:
+    description: >-
+      Include chore: commits in release eligibility and bump calculation
+    required: false
+    default: 'false'
+  update-all-versions:
+    description: >-
+      Bump every manifest even when no changed files were found under that
+      manifest path
+    required: false
+    default: 'false'
+  write-local:
+    description: >-
+      (calculate-next only) Write updated version files to the local filesystem
+      instead of committing them to the branch
+    required: false
+    default: 'false'
+
+outputs:
+  created:
+    description:
+      "'true' if the release command created a release, 'false' otherwise"
+  created-pr:
+    description:
+      "'true' if the release-pr command created/updated a pull request, 'false'
+      otherwise"
+  current-version:
+    description:
+      The current version at the time of the last version-aware command
+  next-version:
+    description: The next version calculated by the last version-aware command
+  manifest-current-version:
+    description:
+      An array of current versions collected from the manifest file. Each entry
+      is also available as an individual output manifest-current-version-0,
+      manifest-current-version-1, etc.
+  manifest-next-version:
+    description:
+      An array of next versions collected from the manifest file. Each entry is
+      also available as an individual output manifest-next-version-0,
+      manifest-next-version-1, etc.
+
+runs:
+  using: node24
+  main: dist/index.js
