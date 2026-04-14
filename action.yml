@@ -33,6 +33,20 @@ inputs:
       branch)
     required: false
     default: ${{ github.event.repository.default_branch }}
+  current-branch:
+    description:
+      The branch that the workflow is currently running on. Used with
+      release-branches to determine whether the action should run.
+    required: false
+    default: ${{ github.ref_name }}
+  release-branches:
+    description: >-
+      Comma-separated list of branch name glob patterns on which releases are
+      permitted (e.g. "master,release/v*,**/release"). When set, the action only
+      runs its commands if the current-branch matches at least one pattern. When
+      unset or empty, the action runs on every branch.
+    required: false
+    default: ${{ github.event.repository.default_branch }}
   pr-branch:
     description: >-
       Destination branch for the pull request. Defaults to target-branch. Use

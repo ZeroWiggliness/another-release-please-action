@@ -536,4 +536,144 @@ describe('main.ts', () => {
     expect(core.setOutput).toHaveBeenCalledWith('current-version', '')
     expect(core.setOutput).toHaveBeenCalledWith('next-version', '')
   })
+
+  describe('release-branches', () => {
+    it('runs commands when current-branch exactly matches release-branches', async () => {
+      core.getInput.mockImplementation((name) => {
+        if (name === 'command') return 'release-pr'
+        if (name === 'repository') return 'owner/repo'
+        if (name === 'release-branches') return 'master'
+        if (name === 'current-branch') return 'master'
+        return ''
+      })
+
+      await run()
+
+      expect(commands.releasePr).toHaveBeenCalledTimes(1)
+    })
+
+    it('sets only created and created-pr to false and runs no commands when branch does not match', async () => {
+      core.getInput.mockImplementation((name) => {
+        if (name === 'command') return 'release-pr'
+        if (name === 'repository') return 'owner/repo'
+        if (name === 'release-branches') return 'master'
+        if (name === 'current-branch') return 'feature/my-feature'
+        return ''
+      })
+
+      await run()
+
+      expect(commands.releasePr).not.toHaveBeenCalled()
+      expect(core.setOutput).toHaveBeenCalledWith('created', 'false')
+      expect(core.setOutput).toHaveBeenCalledWith('created-pr', 'false')
+      expect(core.setOutput).not.toHaveBeenCalledWith(
+        'current-version',
+        expect.anything()
+      )
+      expect(core.setOutput).not.toHaveBeenCalledWith(
+        'next-version',
+        expect.anything()
+      )
+    })
+
+    it('runs commands when current-branch matches a wildcard glob pattern', async () => {
+      core.getInput.mockImplementation((name) => {
+        if (name === 'command') return 'release-pr'
+        if (name === 'repository') return 'owner/repo'
+        if (name === 'release-branches') return 'release/v*'
+        if (name === 'current-branch') return 'release/v1.0'
+        return ''
+      })
+
+      await run()
+
+      expect(commands.releasePr).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not run commands when current-branch does not match the wildcard glob pattern', async () => {
+      core.getInput.mockImplementation((name) => {
+        if (name === 'command') return 'release-pr'
+        if (name === 'repository') return 'owner/repo'
+        if (name === 'release-branches') return 'release/v*'
+        if (name === 'current-branch') return 'feature/new-thing'
+        return ''
+      })
+
+      await run()
+
+      expect(commands.releasePr).not.toHaveBeenCalled()
+    })
+
+    it('runs commands when current-branch matches a ** glob pattern', async () => {
+      core.getInput.mockImplementation((name) => {
+        if (name === 'command') return 'release-pr'
+        if (name === 'repository') return 'owner/repo'
+        if (name === 'release-branches') return '**/release'
+        if (name === 'current-branch') return 'team/feature/release'
+        return ''
+      })
+
+      await run()
+
+      expect(commands.releasePr).toHaveBeenCalledTimes(1)
+    })
+
+    it('runs commands when current-branch matches any pattern in a comma-separated list', async () => {
+      core.getInput.mockImplementation((name) => {
+        if (name === 'command') return 'release-pr'
+        if (name === 'repository') return 'owner/repo'
+        if (name === 'release-branches') return 'master,release/v*'
+        if (name === 'current-branch') return 'release/v2.0'
+        return ''
+      })
+
+      await run()
+
+      expect(commands.releasePr).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not run commands when current-branch matches none of a comma-separated list', async () => {
+      core.getInput.mockImplementation((name) => {
+        if (name === 'command') return 'release-pr'
+        if (name === 'repository') return 'owner/repo'
+        if (name === 'release-branches') return 'master,release/v*'
+        if (name === 'current-branch') return 'develop'
+        return ''
+      })
+
+      await run()
+
+      expect(commands.releasePr).not.toHaveBeenCalled()
+      expect(core.setOutput).toHaveBeenCalledWith('created', 'false')
+      expect(core.setOutput).toHaveBeenCalledWith('created-pr', 'false')
+    })
+
+    it('runs commands when release-branches is empty', async () => {
+      core.getInput.mockImplementation((name) => {
+        if (name === 'command') return 'release-pr'
+        if (name === 'repository') return 'owner/repo'
+        if (name === 'release-branches') return ''
+        if (name === 'current-branch') return 'any-branch'
+        return ''
+      })
+
+      await run()
+
+      expect(commands.releasePr).toHaveBeenCalledTimes(1)
+    })
+
+    it('trims whitespace from release-branches patterns', async () => {
+      core.getInput.mockImplementation((name) => {
+        if (name === 'command') return 'release-pr'
+        if (name === 'repository') return 'owner/repo'
+        if (name === 'release-branches') return ' master , release/v* '
+        if (name === 'current-branch') return 'master'
+        return ''
+      })
+
+      await run()
+
+      expect(commands.releasePr).toHaveBeenCalledTimes(1)
+    })
+  })
 })

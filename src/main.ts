@@ -1,4 +1,5 @@
 import * as core from '@actions/core'
+import { minimatch } from 'minimatch'
 import {
   GitHubProvider,
   loadConfig
@@ -41,6 +42,25 @@ export async function run(): Promise<void> {
     const token = core.getInput('token')
     const repository = core.getInput('repository')
     const provider = core.getInput('provider') || 'github'
+
+    const releaseBranches = core
+      .getInput('release-branches')
+      .split(',')
+      .map((b) => b.trim())
+      .filter((b) => b.length > 0)
+
+    if (releaseBranches.length > 0) {
+      const currentBranch = core.getInput('current-branch')
+      const isReleaseBranch = releaseBranches.some((pattern) =>
+        minimatch(currentBranch, pattern)
+      )
+
+      if (!isReleaseBranch) {
+        core.setOutput('created', 'false')
+        core.setOutput('created-pr', 'false')
+        return
+      }
+    }
 
     const cliArgs: CliArgs = {
       provider,
