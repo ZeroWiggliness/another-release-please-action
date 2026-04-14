@@ -191,26 +191,28 @@ steps:
 
 ## Inputs
 
-| Input                       | Required | Default                                         | Description                                                                                           |
-| --------------------------- | -------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `command`                   | No       | `release,release-pr`                            | Comma-separated list of commands to run in order: `release-pr`, `calculate-next`, `release`           |
-| `provider`                  | No       | `github`                                        | Version control provider                                                                              |
-| `token`                     | No       | `${{ github.token }}`                           | GitHub token used to access the repository                                                            |
-| `repository`                | No       | `${{ github.repository }}`                      | Repository in `owner/repo` format                                                                     |
-| `target-branch`             | No       | `${{ github.event.repository.default_branch }}` | Branch to analyze and use as the release PR target                                                    |
-| `pr-branch`                 | No       | _(defaults to `target-branch`)_                 | Pull request destination branch when it differs from the analyzed branch                              |
-| `prerelease`                | No       | `false`                                         | Enable prerelease version calculation                                                                 |
-| `prerelease-calculate-next` | No       | _(inherits `prerelease`)_                       | `calculate-next` only: override prerelease calculation behavior                                       |
-| `dry-run`                   | No       | `false`                                         | Run without making provider changes                                                                   |
-| `debug`                     | No       | `false`                                         | Enable detailed debug logging                                                                         |
-| `versioner`                 | No       | _(none)_                                        | Override the versioning strategy                                                                      |
-| `version-prefix`            | No       | `v`                                             | Prefix used for tags, such as `v1.2.3`                                                                |
-| `issue-url-template`        | No       | provider-specific default                       | URL template for issue references. Use `{id}` as the placeholder                                      |
-| `type`                      | No       | _(none)_                                        | Override the manifest type for every package                                                          |
-| `use-file-system`           | No       | `true`                                          | Scan and read files from the local checkout instead of provider APIs                                  |
-| `include-chores`            | No       | `false`                                         | Include `chore:` commits in release eligibility and bump calculation                                  |
-| `update-all-versions`       | No       | `false`                                         | Update every manifest even when no changed files were detected under that manifest path               |
-| `write-local`               | No       | `false`                                         | `calculate-next` only: write updated version files to the local filesystem instead of committing them |
+| Input                       | Required | Default                                         | Description                                                                                                                     |
+| --------------------------- | -------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `command`                   | No       | `release,release-pr`                            | Comma-separated list of commands to run in order: `release-pr`, `calculate-next`, `release`                                     |
+| `provider`                  | No       | `github`                                        | Version control provider                                                                                                        |
+| `token`                     | No       | `${{ github.token }}`                           | GitHub token used to access the repository                                                                                      |
+| `repository`                | No       | `${{ github.repository }}`                      | Repository in `owner/repo` format                                                                                               |
+| `target-branch`             | No       | `${{ github.event.repository.default_branch }}` | Branch to analyze and use as the release PR target                                                                              |
+| `current-branch`            | No       | `${{ github.ref_name }}`                        | Branch the workflow is currently running on. Used with `release-branches` to gate execution                                     |
+| `release-branches`          | No       | `${{ github.event.repository.default_branch }}` | Comma-separated glob patterns of branches on which releases are permitted. When unset or empty, the action runs on every branch |
+| `pr-branch`                 | No       | _(defaults to `target-branch`)_                 | Pull request destination branch when it differs from the analyzed branch                                                        |
+| `prerelease`                | No       | `false`                                         | Enable prerelease version calculation                                                                                           |
+| `prerelease-calculate-next` | No       | _(inherits `prerelease`)_                       | `calculate-next` only: override prerelease calculation behavior                                                                 |
+| `dry-run`                   | No       | `false`                                         | Run without making provider changes                                                                                             |
+| `debug`                     | No       | `false`                                         | Enable detailed debug logging                                                                                                   |
+| `versioner`                 | No       | _(none)_                                        | Override the versioning strategy                                                                                                |
+| `version-prefix`            | No       | `v`                                             | Prefix used for tags, such as `v1.2.3`                                                                                          |
+| `issue-url-template`        | No       | provider-specific default                       | URL template for issue references. Use `{id}` as the placeholder                                                                |
+| `type`                      | No       | _(none)_                                        | Override the manifest type for every package                                                                                    |
+| `use-file-system`           | No       | `true`                                          | Scan and read files from the local checkout instead of provider APIs                                                            |
+| `include-chores`            | No       | `false`                                         | Include `chore:` commits in release eligibility and bump calculation                                                            |
+| `update-all-versions`       | No       | `false`                                         | Update every manifest even when no changed files were detected under that manifest path                                         |
+| `write-local`               | No       | `false`                                         | `calculate-next` only: write updated version files to the local filesystem instead of committing them                           |
 
 ## Outputs
 
@@ -241,6 +243,42 @@ steps:
       echo "Next versions:    ${{ steps.arp.outputs.manifest-next-version }}"
       echo "Current version 0: ${{ steps.arp.outputs.manifest-current-version-0 }}"
       echo "Next version 0:    ${{ steps.arp.outputs.manifest-next-version-0 }}"
+```
+
+## Restricting Releases by Branch
+
+By default the action runs on every branch. Set `release-branches` to a
+comma-separated list of [minimatch](https://github.com/isaacs/minimatch) glob
+patterns to limit execution to specific branches only.
+
+```yaml
+- uses: ZeroWiggliness/another-release-please-action@v1
+  with:
+    release-branches: master
+```
+
+The `current-branch` input identifies the branch the workflow is running on and
+is compared against every pattern in `release-branches`. You do not normally
+need to set `current-branch` — its default (`${{ github.ref_name }}`) is correct
+for standard push-triggered workflows.
+
+If no pattern matches, the action exits successfully (exit 0) without running
+any commands. In that case `created` and `created-pr` are set to `'false'` and
+no other outputs are produced.
+
+| Pattern             | Matches                                     |
+| ------------------- | ------------------------------------------- |
+| `master`            | exactly `master`                            |
+| `release/v*`        | `release/v1`, `release/v2`, …               |
+| `**/release`        | `release`, `team/release`, `team/a/release` |
+| `master,release/v*` | `master` and any `release/v…` branch        |
+
+For a multi-branch workflow where only certain branches should produce releases:
+
+```yaml
+- uses: ZeroWiggliness/another-release-please-action@v1
+  with:
+    release-branches: master,release/v*
 ```
 
 ## Bootstrap A Config File
