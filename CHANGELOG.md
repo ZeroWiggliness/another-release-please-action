@@ -1,3 +1,11 @@
+## v0.2.0
+
+### Features
+* add branch restriction feature with release-branches input ([#5](https://github.com/ZeroWiggliness/another-release-please-action/issues/5)) ([f218e90](https://github.com/ZeroWiggliness/another-release-please-action/commit/f218e908b2be3fc360c91d0e08c599144b5962be))
+
+---
+_Generated on 2026-04-14_
+
 ## v0.1.0
 
 ### Features
