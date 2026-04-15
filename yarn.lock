@@ -3046,9 +3046,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@zerowiggliness/another-release-please@npm:^0.1.0":
-  version: 0.1.0
-  resolution: "@zerowiggliness/another-release-please@npm:0.1.0::__archiveUrl=https%3A%2F%2Fnpm.pkg.github.com%2Fdownload%2F%40zerowiggliness%2Fanother-release-please%2F0.1.0%2Fce87211b99ffaf1750ed9fabd777ae3eb41047fd"
+"@zerowiggliness/another-release-please@npm:^0.1.2":
+  version: 0.1.2
+  resolution: "@zerowiggliness/another-release-please@npm:0.1.2::__archiveUrl=https%3A%2F%2Fnpm.pkg.github.com%2Fdownload%2F%40zerowiggliness%2Fanother-release-please%2F0.1.2%2Fbf8c5425f6d631fbd6ef3b94f47f38c3ea96a290"
   dependencies:
     "@gitbeaker/node": "npm:^35.8.1"
     handlebars: "npm:^4.7.9"
@@ -3059,7 +3059,7 @@ __metadata:
     yaml: "npm:^2.8.3"
   bin:
     arp: dist/bin/arp.js
-  checksum: 10c0/8e59bb225027d53cdfabc79949d96cec00d61a558077ccb3b2b378dce986d9612a47f149c3feaf2936071a54b1ab690158e2fde61ffb35495773bfde55d872fa
+  checksum: 10c0/4aa2c0bc22ba728e0bacf2a834d33dc2d4283edc797fc7dd188e7320ba94898ff2ff7edd2b2b3dd8bdb51db65a99d1518855b970e29777c9f61b0b2cfc662af0
   languageName: node
   linkType: hard
 
@@ -7523,7 +7523,7 @@ __metadata:
     "@types/node": "npm:^25.6.0"
     "@typescript-eslint/eslint-plugin": "npm:^8.58.2"
     "@typescript-eslint/parser": "npm:^8.58.2"
-    "@zerowiggliness/another-release-please": "npm:^0.1.0"
+    "@zerowiggliness/another-release-please": "npm:^0.1.2"
     eslint: "npm:^10.2.0"
     eslint-config-prettier: "npm:^10.1.8"
     eslint-plugin-jest: "npm:^29.15.2"
