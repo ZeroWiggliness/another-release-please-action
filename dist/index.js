@@ -30961,7 +30961,19 @@ class JavaPackageManifest extends PackageManifest {
             {
                 path: pomPath,
                 filetype: 'xml',
-                versionPatterns: ['<project\\b[^>]*>(?:[\\s\\S]*?<parent\\b[^>]*>[\\s\\S]*?</parent>)?[\\s\\S]*?<version>([^<]+)</version>'],
+                // Two capture groups: group1 is the prefix up to and including the opening <version> tag,
+                // group2 is the closing </version> tag. The version value sits between the two groups and
+                // is replaced directly, so the replacement is unambiguous even when nested blocks
+                // contain <version> elements with identical values.
+                //
+                // Starting from <project>, the pattern skips over any combination of known container
+                // blocks that can themselves contain <version> elements (parent, dependencies,
+                // dependencyManagement, build, reporting, profiles, distributionManagement,
+                // repositories, pluginRepositories, modules) and advances past all other content
+                // one character at a time until it reaches the first <version> that is a direct
+                // child of <project>. This covers every valid ordering of the project-level
+                // <version> element relative to these blocks.
+                versionPatterns: ['(<project\\b[^>]*>(?:<parent\\b[^>]*>[\\s\\S]*?</parent>|<dependencies\\b[^>]*>[\\s\\S]*?</dependencies>|<dependencyManagement\\b[^>]*>[\\s\\S]*?</dependencyManagement>|<build\\b[^>]*>[\\s\\S]*?</build>|<reporting\\b[^>]*>[\\s\\S]*?</reporting>|<profiles\\b[^>]*>[\\s\\S]*?</profiles>|<distributionManagement\\b[^>]*>[\\s\\S]*?</distributionManagement>|<repositories\\b[^>]*>[\\s\\S]*?</repositories>|<pluginRepositories\\b[^>]*>[\\s\\S]*?</pluginRepositories>|<modules\\b[^>]*>[\\s\\S]*?</modules>|(?!<version\\b)[\\s\\S])*<version>)[^<]+(</version>)'],
             },
         ];
     }
@@ -46784,18 +46796,33 @@ class ManifestProcessor {
         }
     }
     /**
-     * Replace capture group 1 in each regex pattern with newVersion.
+     * Replace the version value in each regex pattern with newVersion.
      * Only replaces the first match per pattern (no `g` flag) to avoid
      * clobbering dependency version entries (e.g. in pom.xml).
+     *
+     * Two calling conventions are supported:
+     *  - Zero capture groups: the entire match is replaced with newVersion.
+     *  - One capture group: group1 is the version value; the first occurrence of
+     *    group1 within the match is replaced.  Works correctly when the version
+     *    value is unique inside the match.
+     *  - Two capture groups: group1 is the text that precedes the version value,
+     *    group2 is the text that follows it.  The replacement is
+     *    `group1 + newVersion + group2`, which is unambiguous regardless of
+     *    whether the version value appears elsewhere in the surrounding context
+     *    (e.g. inside a Maven <parent> block that has the same version).
      */
     applyVersionText(content, patterns, newVersion) {
         let result = content;
         for (const pattern of patterns) {
             const re = new RegExp(pattern);
-            result = result.replace(re, (match, group1) => {
+            result = result.replace(re, (match, group1, group2) => {
                 if (group1 === undefined) {
                     // Pattern has no capture group — replace entire match
                     return newVersion;
+                }
+                if (typeof group2 === 'string') {
+                    // Two-group pattern: group1 is prefix, group2 is suffix
+                    return group1 + newVersion + group2;
                 }
                 return match.replace(group1, newVersion);
             });
