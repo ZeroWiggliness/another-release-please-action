@@ -1,3 +1,13 @@
+## v0.2.1
+
+### Bug Fixes
+* *(dep)* Bump @zerowiggliness/another-release-please from 0.1.0 to 0.1.2 in the npm-production group ([#10](https://github.com/ZeroWiggliness/another-release-please-action/issues/10)) ([831d92d](https://github.com/ZeroWiggliness/another-release-please-action/commit/831d92d69ad59bf7cc5c398cc6f4f25da7d2e6c4))
+* *(dep)* Bump the npm-development group with 6 updates ([#7](https://github.com/ZeroWiggliness/another-release-please-action/issues/7)) ([390f82d](https://github.com/ZeroWiggliness/another-release-please-action/commit/390f82da43ad694f39e1318448e3abd08db77881))
+* add GitHub npm registry configuration for Dependabot updates ([#9](https://github.com/ZeroWiggliness/another-release-please-action/issues/9)) ([aefcc67](https://github.com/ZeroWiggliness/another-release-please-action/commit/aefcc67ec3a2427ea0891e216b263e4fe05524e5))
+
+---
+_Generated on 2026-04-15_
+
 ## v0.2.0
 
 ### Features
