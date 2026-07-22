@@ -49,6 +49,10 @@ describe('main.ts', () => {
           return ''
       }
     })
+    core.getBooleanInput.mockImplementation((name) => {
+      const value = core.getInput(name)
+      return value === 'true' || value === '1'
+    })
 
     arp.loadConfig.mockResolvedValue(mockConfig)
     commands.releasePr.mockResolvedValue(undefined)
@@ -271,6 +275,28 @@ describe('main.ts', () => {
       expect.objectContaining({ prBranch: 'develop' }),
       expect.anything()
     )
+  })
+
+  it('accepts 1 as true for boolean flags', async () => {
+    core.getInput.mockImplementation((name) => {
+      if (name === 'command') return 'release-pr'
+      if (name === 'repository') return 'owner/repo'
+      if (name === 'prerelease') return '1'
+      if (name === 'dry-run') return '1'
+      if (name === 'debug') return '1'
+      if (name === 'include-chores') return '1'
+      if (name === 'update-all-versions') return '1'
+      return ''
+    })
+
+    await run()
+
+    const cliArgs = arp.loadConfig.mock.calls[0][0] as Record<string, unknown>
+    expect(cliArgs.prerelease).toBe(true)
+    expect(cliArgs.dryRun).toBe(true)
+    expect(cliArgs.debug).toBe(true)
+    expect(cliArgs.includeChores).toBe(true)
+    expect(cliArgs.updateAllVersions).toBe(true)
   })
 
   it('forwards include-chores: true as includeChores in cliArgs', async () => {

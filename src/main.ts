@@ -20,6 +20,16 @@ function outputManifestVersions(prefix: string, versions: unknown[]): void {
   })
 }
 
+function getOptionalBooleanInput(inputName: string): boolean | undefined {
+  const rawValue = core.getInput(inputName)
+
+  if (rawValue === '') {
+    return undefined
+  }
+
+  return core.getBooleanInput(inputName)
+}
+
 /**
  * The main function for the action.
  *
@@ -68,16 +78,16 @@ export async function run(): Promise<void> {
       repository,
       targetBranch: core.getInput('target-branch') || undefined,
       prBranch: core.getInput('pr-branch') || undefined,
-      prerelease: core.getInput('prerelease') === 'true',
-      dryRun: core.getInput('dry-run') === 'true',
-      debug: core.getInput('debug') === 'true',
       versioner: core.getInput('versioner') || undefined,
       versionPrefix: core.getInput('version-prefix') || undefined,
       issueUrlTemplate: core.getInput('issue-url-template') || undefined,
       type: core.getInput('type') || undefined,
       useFileSystem: core.getInput('use-file-system') !== 'false',
-      includeChores: core.getInput('include-chores') === 'true',
-      updateAllVersions: core.getInput('update-all-versions') === 'true'
+      prerelease: getOptionalBooleanInput('prerelease'),
+      dryRun: getOptionalBooleanInput('dry-run'),
+      debug: getOptionalBooleanInput('debug'),
+      includeChores: getOptionalBooleanInput('include-chores'),
+      updateAllVersions: getOptionalBooleanInput('update-all-versions')
     }
 
     const repositoryUrl = `https://github.com/${repository}`

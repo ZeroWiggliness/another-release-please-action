@@ -1,3 +1,15 @@
+## v0.2.1
+
+### Bug Fixes
+* *(dep)* Bump @zerowiggliness/another-release-please from 0.1.0 to 0.1.2 in the npm-production group ([#10](https://github.com/ZeroWiggliness/another-release-please-action/issues/10)) ([831d92d](https://github.com/ZeroWiggliness/another-release-please-action/commit/831d92d69ad59bf7cc5c398cc6f4f25da7d2e6c4))
+* *(dep)* Bump actions/checkout from 6 to 7 ([#21](https://github.com/ZeroWiggliness/another-release-please-action/issues/21)) ([fb50490](https://github.com/ZeroWiggliness/another-release-please-action/commit/fb504908eaddd0343a1cc9b79393a1e67f59712d))
+* *(dep)* Bump the npm-development group with 6 updates ([#7](https://github.com/ZeroWiggliness/another-release-please-action/issues/7)) ([390f82d](https://github.com/ZeroWiggliness/another-release-please-action/commit/390f82da43ad694f39e1318448e3abd08db77881))
+* add GitHub npm registry configuration for Dependabot updates ([#9](https://github.com/ZeroWiggliness/another-release-please-action/issues/9)) ([aefcc67](https://github.com/ZeroWiggliness/another-release-please-action/commit/aefcc67ec3a2427ea0891e216b263e4fe05524e5))
+* Stop defaults from overridding. ([#24](https://github.com/ZeroWiggliness/another-release-please-action/issues/24)) ([c332dc8](https://github.com/ZeroWiggliness/another-release-please-action/commit/c332dc89b38367ec327775e5850259354aa7b7d2))
+
+---
+_Generated on 2026-07-22_
+
 ## v0.2.0
 
 ### Features

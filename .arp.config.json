@@ -7,7 +7,6 @@
     "maxCommits": 100,
     "includeChores": false
   },
-  "version": "v0.2.0",
   "versionPrefix": "v",
   "manifests": [
     {

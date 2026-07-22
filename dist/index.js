@@ -28066,6 +28066,27 @@ function getInput(name, options) {
     return val.trim();
 }
 /**
+ * Gets the input value of the boolean type in the YAML 1.2 "core schema" specification.
+ * Support boolean input list: `true | True | TRUE | false | False | FALSE` .
+ * The return value is also in boolean type.
+ * ref: https://yaml.org/spec/1.2/spec.html#id2804923
+ *
+ * @param     name     name of the input to get
+ * @param     options  optional. See InputOptions.
+ * @returns   boolean
+ */
+function getBooleanInput(name, options) {
+    const trueValue = ['true', 'True', 'TRUE'];
+    const falseValue = ['false', 'False', 'FALSE'];
+    const val = getInput(name);
+    if (trueValue.includes(val))
+        return true;
+    if (falseValue.includes(val))
+        return false;
+    throw new TypeError(`Input does not meet YAML 1.2 "Core Schema" specification: ${name}\n` +
+        `Support boolean input list: \`true | True | TRUE | false | False | FALSE\``);
+}
+/**
  * Sets the value of an output.
  *
  * @param     name     name of the output to set
@@ -85488,6 +85509,13 @@ function outputManifestVersions(prefix, versions) {
         setOutput(`${prefix}-${index}`, value);
     });
 }
+function getOptionalBooleanInput(inputName) {
+    const rawValue = getInput(inputName);
+    if (rawValue === '') {
+        return undefined;
+    }
+    return getBooleanInput(inputName);
+}
 /**
  * The main function for the action.
  *
@@ -85523,16 +85551,16 @@ async function run() {
             repository,
             targetBranch: getInput('target-branch') || undefined,
             prBranch: getInput('pr-branch') || undefined,
-            prerelease: getInput('prerelease') === 'true',
-            dryRun: getInput('dry-run') === 'true',
-            debug: getInput('debug') === 'true',
             versioner: getInput('versioner') || undefined,
             versionPrefix: getInput('version-prefix') || undefined,
             issueUrlTemplate: getInput('issue-url-template') || undefined,
             type: getInput('type') || undefined,
             useFileSystem: getInput('use-file-system') !== 'false',
-            includeChores: getInput('include-chores') === 'true',
-            updateAllVersions: getInput('update-all-versions') === 'true'
+            prerelease: getOptionalBooleanInput('prerelease'),
+            dryRun: getOptionalBooleanInput('dry-run'),
+            debug: getOptionalBooleanInput('debug'),
+            includeChores: getOptionalBooleanInput('include-chores'),
+            updateAllVersions: getOptionalBooleanInput('update-all-versions')
         };
         const repositoryUrl = `https://github.com/${repository}`;
         const gitHubProvider = new GitHubProvider(repositoryUrl, token);

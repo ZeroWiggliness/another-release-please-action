@@ -201,18 +201,18 @@ steps:
 | `current-branch`            | No       | `${{ github.ref_name }}`                        | Branch the workflow is currently running on. Used with `release-branches` to gate execution                                     |
 | `release-branches`          | No       | `${{ github.event.repository.default_branch }}` | Comma-separated glob patterns of branches on which releases are permitted. When unset or empty, the action runs on every branch |
 | `pr-branch`                 | No       | _(defaults to `target-branch`)_                 | Pull request destination branch when it differs from the analyzed branch                                                        |
-| `prerelease`                | No       | `false`                                         | Enable prerelease version calculation                                                                                           |
+| `prerelease`                | No       | _(none)_                                        | Enable prerelease version calculation. ARP default is false.                                                                    |
 | `prerelease-calculate-next` | No       | _(inherits `prerelease`)_                       | `calculate-next` only: override prerelease calculation behavior                                                                 |
-| `dry-run`                   | No       | `false`                                         | Run without making provider changes                                                                                             |
-| `debug`                     | No       | `false`                                         | Enable detailed debug logging                                                                                                   |
+| `dry-run`                   | No       | _(none)_                                        | Run without making provider changes. Arp default is false.                                                                      |
+| `debug`                     | No       | _(none)_                                        | Enable detailed debug. Arp default is false. logging                                                                            |
 | `versioner`                 | No       | _(none)_                                        | Override the versioning strategy                                                                                                |
-| `version-prefix`            | No       | `v`                                             | Prefix used for tags, such as `v1.2.3`                                                                                          |
+| `version-prefix`            | No       | _(none)_                                        | Prefix used for tags, such as `v1.2.3`. Arp default 'v'.`                                                                       |
 | `issue-url-template`        | No       | provider-specific default                       | URL template for issue references. Use `{id}` as the placeholder                                                                |
 | `type`                      | No       | _(none)_                                        | Override the manifest type for every package                                                                                    |
-| `use-file-system`           | No       | `true`                                          | Scan and read files from the local checkout instead of provider APIs                                                            |
-| `include-chores`            | No       | `false`                                         | Include `chore:` commits in release eligibility and bump calculation                                                            |
-| `update-all-versions`       | No       | `false`                                         | Update every manifest even when no changed files were detected under that manifest path                                         |
-| `write-local`               | No       | `false`                                         | `calculate-next` only: write updated version files to the local filesystem instead of committing them                           |
+| `use-file-system`           | No       | `true`                                          | Scan and read files from the local checkout instead of provider APIs. Overrides any config file settings.                       |
+| `include-chores`            | No       | _(none)_                                        | Include `chore:` commits in release eligibility and bump calculation. Arp default is false.                                     |
+| `update-all-versions`       | No       | _(none)_                                        | Update every manifest even when no changed files were detected under that manifest path. Arp default is true.                   |
+| `write-local`               | No       | _(none)_                                        | `calculate-next` only: write updated version files to the local filesystem instead of committing them. Arp default is false.    |
 
 ## Outputs
 
