@@ -56,7 +56,6 @@ inputs:
   prerelease:
     description: Calculate a prerelease version
     required: false
-    default: 'false'
   prerelease-calculate-next:
     description: >-
       Calculate a prerelease version for the calculate-next command. Defaults to
@@ -65,17 +64,14 @@ inputs:
   dry-run:
     description: Run without making any changes
     required: false
-    default: 'false'
   debug:
     description: Enable detailed debug logging
     required: false
-    default: 'false'
   versioner:
     description: Versioning strategy to use
     required: false
   version-prefix:
-    description:
-      Prefix for version tags (e.g. "v" produces "v1.2.3"). Defaults to "v"
+    description: Prefix for version tags (e.g. "v" produces "v1.2.3")
     required: false
   issue-url-template:
     description: >-
@@ -97,13 +93,11 @@ inputs:
     description: >-
       Include chore: commits in release eligibility and bump calculation
     required: false
-    default: 'false'
   update-all-versions:
     description: >-
       Bump every manifest even when no changed files were found under that
       manifest path
     required: false
-    default: 'false'
   write-local:
     description: >-
       (calculate-next only) Write updated version files to the local filesystem
