@@ -18,7 +18,9 @@
     {
       "path": "README.md",
       "filetype": "text",
-      "versionPatterns": ["ZeroWiggliness/another-release-please-action@([^<]+)"]
+      "versionPatterns": [
+        "ZeroWiggliness/another-release-please-action@([^<]+)"
+      ]
     }
   ]
 }
