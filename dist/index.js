@@ -3609,9 +3609,9 @@ var hasRequiredConstants$4;
 function requireConstants$4 () {
 	if (hasRequiredConstants$4) return constants$4;
 	hasRequiredConstants$4 = 1;
-	(function (exports$1) {
-		Object.defineProperty(exports$1, "__esModule", { value: true });
-		exports$1.SPECIAL_HEADERS = exports$1.HEADER_STATE = exports$1.MINOR = exports$1.MAJOR = exports$1.CONNECTION_TOKEN_CHARS = exports$1.HEADER_CHARS = exports$1.TOKEN = exports$1.STRICT_TOKEN = exports$1.HEX = exports$1.URL_CHAR = exports$1.STRICT_URL_CHAR = exports$1.USERINFO_CHARS = exports$1.MARK = exports$1.ALPHANUM = exports$1.NUM = exports$1.HEX_MAP = exports$1.NUM_MAP = exports$1.ALPHA = exports$1.FINISH = exports$1.H_METHOD_MAP = exports$1.METHOD_MAP = exports$1.METHODS_RTSP = exports$1.METHODS_ICE = exports$1.METHODS_HTTP = exports$1.METHODS = exports$1.LENIENT_FLAGS = exports$1.FLAGS = exports$1.TYPE = exports$1.ERROR = void 0;
+	(function (exports) {
+		Object.defineProperty(exports, "__esModule", { value: true });
+		exports.SPECIAL_HEADERS = exports.HEADER_STATE = exports.MINOR = exports.MAJOR = exports.CONNECTION_TOKEN_CHARS = exports.HEADER_CHARS = exports.TOKEN = exports.STRICT_TOKEN = exports.HEX = exports.URL_CHAR = exports.STRICT_URL_CHAR = exports.USERINFO_CHARS = exports.MARK = exports.ALPHANUM = exports.NUM = exports.HEX_MAP = exports.NUM_MAP = exports.ALPHA = exports.FINISH = exports.H_METHOD_MAP = exports.METHOD_MAP = exports.METHODS_RTSP = exports.METHODS_ICE = exports.METHODS_HTTP = exports.METHODS = exports.LENIENT_FLAGS = exports.FLAGS = exports.TYPE = exports.ERROR = void 0;
 		const utils_1 = requireUtils$2();
 		(function (ERROR) {
 		    ERROR[ERROR["OK"] = 0] = "OK";
@@ -3639,12 +3639,12 @@ function requireConstants$4 () {
 		    ERROR[ERROR["PAUSED_UPGRADE"] = 22] = "PAUSED_UPGRADE";
 		    ERROR[ERROR["PAUSED_H2_UPGRADE"] = 23] = "PAUSED_H2_UPGRADE";
 		    ERROR[ERROR["USER"] = 24] = "USER";
-		})(exports$1.ERROR || (exports$1.ERROR = {}));
+		})(exports.ERROR || (exports.ERROR = {}));
 		(function (TYPE) {
 		    TYPE[TYPE["BOTH"] = 0] = "BOTH";
 		    TYPE[TYPE["REQUEST"] = 1] = "REQUEST";
 		    TYPE[TYPE["RESPONSE"] = 2] = "RESPONSE";
-		})(exports$1.TYPE || (exports$1.TYPE = {}));
+		})(exports.TYPE || (exports.TYPE = {}));
 		(function (FLAGS) {
 		    FLAGS[FLAGS["CONNECTION_KEEP_ALIVE"] = 1] = "CONNECTION_KEEP_ALIVE";
 		    FLAGS[FLAGS["CONNECTION_CLOSE"] = 2] = "CONNECTION_CLOSE";
@@ -3656,12 +3656,12 @@ function requireConstants$4 () {
 		    FLAGS[FLAGS["TRAILING"] = 128] = "TRAILING";
 		    // 1 << 8 is unused
 		    FLAGS[FLAGS["TRANSFER_ENCODING"] = 512] = "TRANSFER_ENCODING";
-		})(exports$1.FLAGS || (exports$1.FLAGS = {}));
+		})(exports.FLAGS || (exports.FLAGS = {}));
 		(function (LENIENT_FLAGS) {
 		    LENIENT_FLAGS[LENIENT_FLAGS["HEADERS"] = 1] = "HEADERS";
 		    LENIENT_FLAGS[LENIENT_FLAGS["CHUNKED_LENGTH"] = 2] = "CHUNKED_LENGTH";
 		    LENIENT_FLAGS[LENIENT_FLAGS["KEEP_ALIVE"] = 4] = "KEEP_ALIVE";
-		})(exports$1.LENIENT_FLAGS || (exports$1.LENIENT_FLAGS = {}));
+		})(exports.LENIENT_FLAGS || (exports.LENIENT_FLAGS = {}));
 		var METHODS;
 		(function (METHODS) {
 		    METHODS[METHODS["DELETE"] = 0] = "DELETE";
@@ -3721,8 +3721,8 @@ function requireConstants$4 () {
 		    METHODS[METHODS["RECORD"] = 44] = "RECORD";
 		    /* RAOP */
 		    METHODS[METHODS["FLUSH"] = 45] = "FLUSH";
-		})(METHODS = exports$1.METHODS || (exports$1.METHODS = {}));
-		exports$1.METHODS_HTTP = [
+		})(METHODS = exports.METHODS || (exports.METHODS = {}));
+		exports.METHODS_HTTP = [
 		    METHODS.DELETE,
 		    METHODS.GET,
 		    METHODS.HEAD,
@@ -3760,10 +3760,10 @@ function requireConstants$4 () {
 		    // TODO(indutny): should we allow it with HTTP?
 		    METHODS.SOURCE,
 		];
-		exports$1.METHODS_ICE = [
+		exports.METHODS_ICE = [
 		    METHODS.SOURCE,
 		];
-		exports$1.METHODS_RTSP = [
+		exports.METHODS_RTSP = [
 		    METHODS.OPTIONS,
 		    METHODS.DESCRIBE,
 		    METHODS.ANNOUNCE,
@@ -3780,59 +3780,59 @@ function requireConstants$4 () {
 		    METHODS.GET,
 		    METHODS.POST,
 		];
-		exports$1.METHOD_MAP = utils_1.enumToMap(METHODS);
-		exports$1.H_METHOD_MAP = {};
-		Object.keys(exports$1.METHOD_MAP).forEach((key) => {
+		exports.METHOD_MAP = utils_1.enumToMap(METHODS);
+		exports.H_METHOD_MAP = {};
+		Object.keys(exports.METHOD_MAP).forEach((key) => {
 		    if (/^H/.test(key)) {
-		        exports$1.H_METHOD_MAP[key] = exports$1.METHOD_MAP[key];
+		        exports.H_METHOD_MAP[key] = exports.METHOD_MAP[key];
 		    }
 		});
 		(function (FINISH) {
 		    FINISH[FINISH["SAFE"] = 0] = "SAFE";
 		    FINISH[FINISH["SAFE_WITH_CB"] = 1] = "SAFE_WITH_CB";
 		    FINISH[FINISH["UNSAFE"] = 2] = "UNSAFE";
-		})(exports$1.FINISH || (exports$1.FINISH = {}));
-		exports$1.ALPHA = [];
+		})(exports.FINISH || (exports.FINISH = {}));
+		exports.ALPHA = [];
 		for (let i = 'A'.charCodeAt(0); i <= 'Z'.charCodeAt(0); i++) {
 		    // Upper case
-		    exports$1.ALPHA.push(String.fromCharCode(i));
+		    exports.ALPHA.push(String.fromCharCode(i));
 		    // Lower case
-		    exports$1.ALPHA.push(String.fromCharCode(i + 0x20));
+		    exports.ALPHA.push(String.fromCharCode(i + 0x20));
 		}
-		exports$1.NUM_MAP = {
+		exports.NUM_MAP = {
 		    0: 0, 1: 1, 2: 2, 3: 3, 4: 4,
 		    5: 5, 6: 6, 7: 7, 8: 8, 9: 9,
 		};
-		exports$1.HEX_MAP = {
+		exports.HEX_MAP = {
 		    0: 0, 1: 1, 2: 2, 3: 3, 4: 4,
 		    5: 5, 6: 6, 7: 7, 8: 8, 9: 9,
 		    A: 0XA, B: 0XB, C: 0XC, D: 0XD, E: 0XE, F: 0XF,
 		    a: 0xa, b: 0xb, c: 0xc, d: 0xd, e: 0xe, f: 0xf,
 		};
-		exports$1.NUM = [
+		exports.NUM = [
 		    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
 		];
-		exports$1.ALPHANUM = exports$1.ALPHA.concat(exports$1.NUM);
-		exports$1.MARK = ['-', '_', '.', '!', '~', '*', '\'', '(', ')'];
-		exports$1.USERINFO_CHARS = exports$1.ALPHANUM
-		    .concat(exports$1.MARK)
+		exports.ALPHANUM = exports.ALPHA.concat(exports.NUM);
+		exports.MARK = ['-', '_', '.', '!', '~', '*', '\'', '(', ')'];
+		exports.USERINFO_CHARS = exports.ALPHANUM
+		    .concat(exports.MARK)
 		    .concat(['%', ';', ':', '&', '=', '+', '$', ',']);
 		// TODO(indutny): use RFC
-		exports$1.STRICT_URL_CHAR = [
+		exports.STRICT_URL_CHAR = [
 		    '!', '"', '$', '%', '&', '\'',
 		    '(', ')', '*', '+', ',', '-', '.', '/',
 		    ':', ';', '<', '=', '>',
 		    '@', '[', '\\', ']', '^', '_',
 		    '`',
 		    '{', '|', '}', '~',
-		].concat(exports$1.ALPHANUM);
-		exports$1.URL_CHAR = exports$1.STRICT_URL_CHAR
+		].concat(exports.ALPHANUM);
+		exports.URL_CHAR = exports.STRICT_URL_CHAR
 		    .concat(['\t', '\f']);
 		// All characters with 0x80 bit set to 1
 		for (let i = 0x80; i <= 0xff; i++) {
-		    exports$1.URL_CHAR.push(i);
+		    exports.URL_CHAR.push(i);
 		}
-		exports$1.HEX = exports$1.NUM.concat(['a', 'b', 'c', 'd', 'e', 'f', 'A', 'B', 'C', 'D', 'E', 'F']);
+		exports.HEX = exports.NUM.concat(['a', 'b', 'c', 'd', 'e', 'f', 'A', 'B', 'C', 'D', 'E', 'F']);
 		/* Tokens as defined by rfc 2616. Also lowercases them.
 		 *        token       = 1*<any CHAR except CTLs or separators>
 		 *     separators     = "(" | ")" | "<" | ">" | "@"
@@ -3840,27 +3840,27 @@ function requireConstants$4 () {
 		 *                    | "/" | "[" | "]" | "?" | "="
 		 *                    | "{" | "}" | SP | HT
 		 */
-		exports$1.STRICT_TOKEN = [
+		exports.STRICT_TOKEN = [
 		    '!', '#', '$', '%', '&', '\'',
 		    '*', '+', '-', '.',
 		    '^', '_', '`',
 		    '|', '~',
-		].concat(exports$1.ALPHANUM);
-		exports$1.TOKEN = exports$1.STRICT_TOKEN.concat([' ']);
+		].concat(exports.ALPHANUM);
+		exports.TOKEN = exports.STRICT_TOKEN.concat([' ']);
 		/*
 		 * Verify that a char is a valid visible (printable) US-ASCII
 		 * character or %x80-FF
 		 */
-		exports$1.HEADER_CHARS = ['\t'];
+		exports.HEADER_CHARS = ['\t'];
 		for (let i = 32; i <= 255; i++) {
 		    if (i !== 127) {
-		        exports$1.HEADER_CHARS.push(i);
+		        exports.HEADER_CHARS.push(i);
 		    }
 		}
 		// ',' = \x44
-		exports$1.CONNECTION_TOKEN_CHARS = exports$1.HEADER_CHARS.filter((c) => c !== 44);
-		exports$1.MAJOR = exports$1.NUM_MAP;
-		exports$1.MINOR = exports$1.MAJOR;
+		exports.CONNECTION_TOKEN_CHARS = exports.HEADER_CHARS.filter((c) => c !== 44);
+		exports.MAJOR = exports.NUM_MAP;
+		exports.MINOR = exports.MAJOR;
 		var HEADER_STATE;
 		(function (HEADER_STATE) {
 		    HEADER_STATE[HEADER_STATE["GENERAL"] = 0] = "GENERAL";
@@ -3872,8 +3872,8 @@ function requireConstants$4 () {
 		    HEADER_STATE[HEADER_STATE["CONNECTION_CLOSE"] = 6] = "CONNECTION_CLOSE";
 		    HEADER_STATE[HEADER_STATE["CONNECTION_UPGRADE"] = 7] = "CONNECTION_UPGRADE";
 		    HEADER_STATE[HEADER_STATE["TRANSFER_ENCODING_CHUNKED"] = 8] = "TRANSFER_ENCODING_CHUNKED";
-		})(HEADER_STATE = exports$1.HEADER_STATE || (exports$1.HEADER_STATE = {}));
-		exports$1.SPECIAL_HEADERS = {
+		})(HEADER_STATE = exports.HEADER_STATE || (exports.HEADER_STATE = {}));
+		exports.SPECIAL_HEADERS = {
 		    'connection': HEADER_STATE.CONNECTION,
 		    'content-length': HEADER_STATE.CONTENT_LENGTH,
 		    'proxy-connection': HEADER_STATE.CONNECTION,
@@ -8764,10 +8764,10 @@ function requireClientH1 () {
 	const TIMEOUT_KEEP_ALIVE = 8 | USE_NATIVE_TIMER;
 
 	class Parser {
-	  constructor (client, socket, { exports: exports$1 }) {
+	  constructor (client, socket, { exports }) {
 	    assert(Number.isFinite(client[kMaxHeadersSize]) && client[kMaxHeadersSize] > 0);
 
-	    this.llhttp = exports$1;
+	    this.llhttp = exports;
 	    this.ptr = this.llhttp.llhttp_alloc(constants.TYPE.RESPONSE);
 	    this.client = client;
 	    this.socket = socket;
@@ -31088,6 +31088,68 @@ class CustomPackageManifest extends PackageManifest {
 }
 
 /**
+ * Gradle package manifest processor
+ * Handles versioning for Gradle projects (Groovy and Kotlin DSL)
+ */
+/**
+ * Gradle package manifest processor.
+ * Default target files:
+ *   - gradle.properties        — `version=1.0.0`
+ *   - ** /build.gradle          — `version = '1.0.0'`  (Groovy DSL)
+ *   - ** /build.gradle.kts      — `version = "1.0.0"`  (Kotlin DSL)
+ *
+ * Gradle follows the Maven SNAPSHOT convention: pre-release builds append
+ * `-SNAPSHOT` to the version string (e.g. `1.2.3-SNAPSHOT`). There is no
+ * conventional version prefix such as "v".
+ */
+class GradlePackageManifest extends PackageManifest {
+    process(_commits) {
+        info(`   Processing manifest: ${this.manifest.path || '(root)'} [${this.manifest.type}] ${this.manifest.currentVersion}`);
+        if (this.manifest.files && this.manifest.files.length > 0) {
+            warn$1(`   Manifest '${this.manifest.path || '(root)'}' has explicitly configured files, but they will be ignored for type '${this.manifest.type}'. Default file patterns are used instead.`);
+        }
+        return new ProcessedManifest(this.manifest.path, this.manifest.currentVersion, this.defaultFiles(), this.manifest.versionPrefix ?? '', this.manifest.identifier ?? 'SNAPSHOT', this.manifest.identifierBase);
+    }
+    defaultFiles() {
+        const dir = normalizePath(this.manifest.path);
+        // gradle.properties lives at the root of the project (not recursively nested)
+        const propsPath = dir ? `${dir}/gradle.properties` : 'gradle.properties';
+        // build.gradle and build.gradle.kts may appear in subprojects of a multi-project build
+        const buildGradlePath = dir ? `${dir}/**/build.gradle` : '**/build.gradle';
+        const buildGradleKtsPath = dir ? `${dir}/**/build.gradle.kts` : '**/build.gradle.kts';
+        return [
+            {
+                path: propsPath,
+                filetype: 'text',
+                // Matches `version = 1.0.0` or `version=1.0.0` in a .properties file.
+                // The negative lookbehind (?<![\w.]) ensures only a key whose name is
+                // exactly `version` is matched: it prevents matching `springVersion=...`
+                // (preceded by a word character) and dot-namespaced keys such as
+                // `myapp.version=...` (preceded by a dot).
+                // Capture group 1 is the version value.
+                versionPatterns: ['(?<![\\w.])version\\s*=\\s*([^\\s\\n\\r]+)'],
+            },
+            {
+                path: buildGradlePath,
+                filetype: 'text',
+                // Matches `version = '1.0.0'` in Groovy DSL (single-quoted string).
+                // The word boundary prevents matching `springVersion = '...'`.
+                // Capture group 1 is the version value.
+                versionPatterns: ["\\bversion\\s*=\\s*'([^']+)'"],
+            },
+            {
+                path: buildGradleKtsPath,
+                filetype: 'text',
+                // Matches `version = "1.0.0"` in Kotlin DSL (double-quoted string).
+                // The word boundary prevents matching `springVersion = "..."`.
+                // Capture group 1 is the version value.
+                versionPatterns: ['\\bversion\\s*=\\s*"([^"]+)"'],
+            },
+        ];
+    }
+}
+
+/**
  * Package manifest factory with registry pattern
  */
 /**
@@ -31121,6 +31183,7 @@ registerManifestType('java', JavaPackageManifest);
 registerManifestType('csharp', CSharpPackageManifest);
 registerManifestType('helm', HelmPackageManifest);
 registerManifestType('custom', CustomPackageManifest);
+registerManifestType('gradle', GradlePackageManifest);
 
 /**
  * Abstract base class for changelog generators.
@@ -31279,9 +31342,9 @@ var hasRequiredException;
 function requireException () {
 	if (hasRequiredException) return exception.exports;
 	hasRequiredException = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 		var errorProps = ['description', 'fileName', 'lineNumber', 'endLineNumber', 'message', 'name', 'number', 'stack'];
 
 		function Exception(message, node) {
@@ -31340,8 +31403,8 @@ function requireException () {
 
 		Exception.prototype = new Error();
 
-		exports$1['default'] = Exception;
-		module.exports = exports$1['default'];
+		exports['default'] = Exception;
+		module.exports = exports['default'];
 		
 	} (exception, exception.exports));
 	return exception.exports;
@@ -31356,13 +31419,13 @@ var hasRequiredBlockHelperMissing;
 function requireBlockHelperMissing () {
 	if (hasRequiredBlockHelperMissing) return blockHelperMissing.exports;
 	hasRequiredBlockHelperMissing = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 
 		var _utils = requireUtils$1();
 
-		exports$1['default'] = function (instance) {
+		exports['default'] = function (instance) {
 		  instance.registerHelper('blockHelperMissing', function (context, options) {
 		    var inverse = options.inverse,
 		        fn = options.fn;
@@ -31393,7 +31456,7 @@ function requireBlockHelperMissing () {
 		  });
 		};
 
-		module.exports = exports$1['default'];
+		module.exports = exports['default'];
 		
 	} (blockHelperMissing, blockHelperMissing.exports));
 	return blockHelperMissing.exports;
@@ -31406,9 +31469,9 @@ var hasRequiredEach;
 function requireEach () {
 	if (hasRequiredEach) return each.exports;
 	hasRequiredEach = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 		// istanbul ignore next
 
 		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { 'default': obj }; }
@@ -31419,7 +31482,7 @@ function requireEach () {
 
 		var _exception2 = _interopRequireDefault(_exception);
 
-		exports$1['default'] = function (instance) {
+		exports['default'] = function (instance) {
 		  instance.registerHelper('each', function (context, options) {
 		    if (!options) {
 		      throw new _exception2['default']('Must pass iterator to #each');
@@ -31508,7 +31571,7 @@ function requireEach () {
 		  });
 		};
 
-		module.exports = exports$1['default'];
+		module.exports = exports['default'];
 		
 	} (each, each.exports));
 	return each.exports;
@@ -31521,9 +31584,9 @@ var hasRequiredHelperMissing;
 function requireHelperMissing () {
 	if (hasRequiredHelperMissing) return helperMissing.exports;
 	hasRequiredHelperMissing = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 		// istanbul ignore next
 
 		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { 'default': obj }; }
@@ -31532,7 +31595,7 @@ function requireHelperMissing () {
 
 		var _exception2 = _interopRequireDefault(_exception);
 
-		exports$1['default'] = function (instance) {
+		exports['default'] = function (instance) {
 		  instance.registerHelper('helperMissing', function () /* [args, ]options */{
 		    if (arguments.length === 1) {
 		      // A missing field in a {{foo}} construct.
@@ -31544,7 +31607,7 @@ function requireHelperMissing () {
 		  });
 		};
 
-		module.exports = exports$1['default'];
+		module.exports = exports['default'];
 		
 	} (helperMissing, helperMissing.exports));
 	return helperMissing.exports;
@@ -31557,9 +31620,9 @@ var hasRequired_if;
 function require_if () {
 	if (hasRequired_if) return _if.exports;
 	hasRequired_if = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 		// istanbul ignore next
 
 		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { 'default': obj }; }
@@ -31570,7 +31633,7 @@ function require_if () {
 
 		var _exception2 = _interopRequireDefault(_exception);
 
-		exports$1['default'] = function (instance) {
+		exports['default'] = function (instance) {
 		  instance.registerHelper('if', function (conditional, options) {
 		    if (arguments.length != 2) {
 		      throw new _exception2['default']('#if requires exactly one argument');
@@ -31601,7 +31664,7 @@ function require_if () {
 		  });
 		};
 
-		module.exports = exports$1['default'];
+		module.exports = exports['default'];
 		
 	} (_if, _if.exports));
 	return _if.exports;
@@ -31614,11 +31677,11 @@ var hasRequiredLog;
 function requireLog () {
 	if (hasRequiredLog) return log.exports;
 	hasRequiredLog = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 
-		exports$1['default'] = function (instance) {
+		exports['default'] = function (instance) {
 		  instance.registerHelper('log', function () /* message, options */{
 		    var args = [undefined],
 		        options = arguments[arguments.length - 1];
@@ -31638,7 +31701,7 @@ function requireLog () {
 		  });
 		};
 
-		module.exports = exports$1['default'];
+		module.exports = exports['default'];
 		
 	} (log, log.exports));
 	return log.exports;
@@ -31651,11 +31714,11 @@ var hasRequiredLookup;
 function requireLookup () {
 	if (hasRequiredLookup) return lookup.exports;
 	hasRequiredLookup = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 
-		exports$1['default'] = function (instance) {
+		exports['default'] = function (instance) {
 		  instance.registerHelper('lookup', function (obj, field, options) {
 		    if (!obj) {
 		      // Note for 5.0: Change to "obj == null" in 5.0
@@ -31665,7 +31728,7 @@ function requireLookup () {
 		  });
 		};
 
-		module.exports = exports$1['default'];
+		module.exports = exports['default'];
 		
 	} (lookup, lookup.exports));
 	return lookup.exports;
@@ -31678,9 +31741,9 @@ var hasRequired_with;
 function require_with () {
 	if (hasRequired_with) return _with.exports;
 	hasRequired_with = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 		// istanbul ignore next
 
 		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { 'default': obj }; }
@@ -31691,7 +31754,7 @@ function require_with () {
 
 		var _exception2 = _interopRequireDefault(_exception);
 
-		exports$1['default'] = function (instance) {
+		exports['default'] = function (instance) {
 		  instance.registerHelper('with', function (context, options) {
 		    if (arguments.length != 2) {
 		      throw new _exception2['default']('#with requires exactly one argument');
@@ -31719,7 +31782,7 @@ function require_with () {
 		  });
 		};
 
-		module.exports = exports$1['default'];
+		module.exports = exports['default'];
 		
 	} (_with, _with.exports));
 	return _with.exports;
@@ -31798,13 +31861,13 @@ var hasRequiredInline;
 function requireInline () {
 	if (hasRequiredInline) return inline.exports;
 	hasRequiredInline = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 
 		var _utils = requireUtils$1();
 
-		exports$1['default'] = function (instance) {
+		exports['default'] = function (instance) {
 		  instance.registerDecorator('inline', function (fn, props, container, options) {
 		    var ret = fn;
 		    if (!props.partials) {
@@ -31825,7 +31888,7 @@ function requireInline () {
 		  });
 		};
 
-		module.exports = exports$1['default'];
+		module.exports = exports['default'];
 		
 	} (inline, inline.exports));
 	return inline.exports;
@@ -31861,9 +31924,9 @@ var hasRequiredLogger;
 function requireLogger () {
 	if (hasRequiredLogger) return logger.exports;
 	hasRequiredLogger = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 
 		var _utils = requireUtils$1();
 
@@ -31905,8 +31968,8 @@ function requireLogger () {
 		  }
 		};
 
-		exports$1['default'] = logger;
-		module.exports = exports$1['default'];
+		exports['default'] = logger;
+		module.exports = exports['default'];
 		
 	} (logger, logger.exports));
 	return logger.exports;
@@ -32129,9 +32192,9 @@ var hasRequiredSafeString;
 function requireSafeString () {
 	if (hasRequiredSafeString) return safeString.exports;
 	hasRequiredSafeString = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 		function SafeString(string) {
 		  this.string = string;
 		}
@@ -32140,8 +32203,8 @@ function requireSafeString () {
 		  return '' + this.string;
 		};
 
-		exports$1['default'] = SafeString;
-		module.exports = exports$1['default'];
+		exports['default'] = SafeString;
+		module.exports = exports['default'];
 		
 	} (safeString, safeString.exports));
 	return safeString.exports;
@@ -32572,11 +32635,11 @@ var hasRequiredNoConflict;
 function requireNoConflict () {
 	if (hasRequiredNoConflict) return noConflict.exports;
 	hasRequiredNoConflict = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 
-		exports$1['default'] = function (Handlebars) {
+		exports['default'] = function (Handlebars) {
 		  /* istanbul ignore next */
 		  // https://mathiasbynens.be/notes/globalthis
 		  (function () {
@@ -32599,7 +32662,7 @@ function requireNoConflict () {
 		  };
 		};
 
-		module.exports = exports$1['default'];
+		module.exports = exports['default'];
 		
 	} (noConflict, noConflict.exports));
 	return noConflict.exports;
@@ -32610,9 +32673,9 @@ var hasRequiredHandlebars_runtime;
 function requireHandlebars_runtime () {
 	if (hasRequiredHandlebars_runtime) return handlebars_runtime.exports;
 	hasRequiredHandlebars_runtime = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 		// istanbul ignore next
 
 		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { 'default': obj }; }
@@ -32673,8 +32736,8 @@ function requireHandlebars_runtime () {
 
 		inst['default'] = inst;
 
-		exports$1['default'] = inst;
-		module.exports = exports$1['default'];
+		exports['default'] = inst;
+		module.exports = exports['default'];
 		
 	} (handlebars_runtime, handlebars_runtime.exports));
 	return handlebars_runtime.exports;
@@ -32687,9 +32750,9 @@ var hasRequiredAst;
 function requireAst () {
 	if (hasRequiredAst) return ast.exports;
 	hasRequiredAst = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 		var AST = {
 		  // Public API used to evaluate derived attributes regarding AST nodes
 		  helpers: {
@@ -32715,8 +32778,8 @@ function requireAst () {
 
 		// Must be exported as an object rather than the root of the module as the jison lexer
 		// must modify the object to operate properly.
-		exports$1['default'] = AST;
-		module.exports = exports$1['default'];
+		exports['default'] = AST;
+		module.exports = exports['default'];
 		
 	} (ast, ast.exports));
 	return ast.exports;
@@ -32731,9 +32794,9 @@ var hasRequiredParser;
 function requireParser () {
 	if (hasRequiredParser) return parser.exports;
 	hasRequiredParser = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 		var handlebars = (function () {
 		    var parser = { trace: function trace() {},
 		        yy: {},
@@ -33399,8 +33462,8 @@ function requireParser () {
 		        this.yy = {};
 		    }Parser.prototype = parser;parser.Parser = Parser;
 		    return new Parser();
-		})();exports$1["default"] = handlebars;
-		module.exports = exports$1["default"];
+		})();exports["default"] = handlebars;
+		module.exports = exports["default"];
 		
 	} (parser, parser.exports));
 	return parser.exports;
@@ -33415,9 +33478,9 @@ var hasRequiredVisitor;
 function requireVisitor () {
 	if (hasRequiredVisitor) return visitor.exports;
 	hasRequiredVisitor = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 		// istanbul ignore next
 
 		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { 'default': obj }; }
@@ -33552,8 +33615,8 @@ function requireVisitor () {
 		  this.acceptKey(partial, 'hash');
 		}
 
-		exports$1['default'] = Visitor;
-		module.exports = exports$1['default'];
+		exports['default'] = Visitor;
+		module.exports = exports['default'];
 		
 	} (visitor, visitor.exports));
 	return visitor.exports;
@@ -33564,9 +33627,9 @@ var hasRequiredWhitespaceControl;
 function requireWhitespaceControl () {
 	if (hasRequiredWhitespaceControl) return whitespaceControl.exports;
 	hasRequiredWhitespaceControl = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 		// istanbul ignore next
 
 		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { 'default': obj }; }
@@ -33782,8 +33845,8 @@ function requireWhitespaceControl () {
 		  return current.leftStripped;
 		}
 
-		exports$1['default'] = WhitespaceControl;
-		module.exports = exports$1['default'];
+		exports['default'] = WhitespaceControl;
+		module.exports = exports['default'];
 		
 	} (whitespaceControl, whitespaceControl.exports));
 	return whitespaceControl.exports;
@@ -34970,7 +35033,7 @@ var hasRequiredUtil;
 function requireUtil () {
 	if (hasRequiredUtil) return util;
 	hasRequiredUtil = 1;
-	(function (exports$1) {
+	(function (exports) {
 		/*
 		 * Copyright 2011 Mozilla Foundation and contributors
 		 * Licensed under the New BSD license. See LICENSE or:
@@ -34996,7 +35059,7 @@ function requireUtil () {
 		    throw new Error('"' + aName + '" is a required argument.');
 		  }
 		}
-		exports$1.getArg = getArg;
+		exports.getArg = getArg;
 
 		var urlRegexp = /^(?:([\w+\-.]+):)?\/\/(?:(\w+:\w+)@)?([\w.-]*)(?::(\d+))?(.*)$/;
 		var dataUrlRegexp = /^data:.+\,.+$/;
@@ -35014,7 +35077,7 @@ function requireUtil () {
 		    path: match[5]
 		  };
 		}
-		exports$1.urlParse = urlParse;
+		exports.urlParse = urlParse;
 
 		function urlGenerate(aParsedUrl) {
 		  var url = '';
@@ -35036,7 +35099,7 @@ function requireUtil () {
 		  }
 		  return url;
 		}
-		exports$1.urlGenerate = urlGenerate;
+		exports.urlGenerate = urlGenerate;
 
 		/**
 		 * Normalizes a path, or the path portion of a URL:
@@ -35058,7 +35121,7 @@ function requireUtil () {
 		    }
 		    path = url.path;
 		  }
-		  var isAbsolute = exports$1.isAbsolute(path);
+		  var isAbsolute = exports.isAbsolute(path);
 
 		  var parts = path.split(/\/+/);
 		  for (var part, up = 0, i = parts.length - 1; i >= 0; i--) {
@@ -35092,7 +35155,7 @@ function requireUtil () {
 		  }
 		  return path;
 		}
-		exports$1.normalize = normalize;
+		exports.normalize = normalize;
 
 		/**
 		 * Joins two paths/URLs.
@@ -35151,9 +35214,9 @@ function requireUtil () {
 		  }
 		  return joined;
 		}
-		exports$1.join = join;
+		exports.join = join;
 
-		exports$1.isAbsolute = function (aPath) {
+		exports.isAbsolute = function (aPath) {
 		  return aPath.charAt(0) === '/' || urlRegexp.test(aPath);
 		};
 
@@ -35195,7 +35258,7 @@ function requireUtil () {
 		  // Make sure we add a "../" for each component we removed from the root.
 		  return Array(level + 1).join("../") + aPath.substr(aRoot.length + 1);
 		}
-		exports$1.relative = relative;
+		exports.relative = relative;
 
 		var supportsNullProto = (function () {
 		  var obj = Object.create(null);
@@ -35222,7 +35285,7 @@ function requireUtil () {
 
 		  return aStr;
 		}
-		exports$1.toSetString = supportsNullProto ? identity : toSetString;
+		exports.toSetString = supportsNullProto ? identity : toSetString;
 
 		function fromSetString(aStr) {
 		  if (isProtoString(aStr)) {
@@ -35231,7 +35294,7 @@ function requireUtil () {
 
 		  return aStr;
 		}
-		exports$1.fromSetString = supportsNullProto ? identity : fromSetString;
+		exports.fromSetString = supportsNullProto ? identity : fromSetString;
 
 		function isProtoString(s) {
 		  if (!s) {
@@ -35301,7 +35364,7 @@ function requireUtil () {
 
 		  return strcmp(mappingA.name, mappingB.name);
 		}
-		exports$1.compareByOriginalPositions = compareByOriginalPositions;
+		exports.compareByOriginalPositions = compareByOriginalPositions;
 
 		/**
 		 * Comparator between two mappings with deflated source and name indices where
@@ -35340,7 +35403,7 @@ function requireUtil () {
 
 		  return strcmp(mappingA.name, mappingB.name);
 		}
-		exports$1.compareByGeneratedPositionsDeflated = compareByGeneratedPositionsDeflated;
+		exports.compareByGeneratedPositionsDeflated = compareByGeneratedPositionsDeflated;
 
 		function strcmp(aStr1, aStr2) {
 		  if (aStr1 === aStr2) {
@@ -35394,7 +35457,7 @@ function requireUtil () {
 
 		  return strcmp(mappingA.name, mappingB.name);
 		}
-		exports$1.compareByGeneratedPositionsInflated = compareByGeneratedPositionsInflated;
+		exports.compareByGeneratedPositionsInflated = compareByGeneratedPositionsInflated;
 
 		/**
 		 * Strip any JSON XSSI avoidance prefix from the string (as documented
@@ -35404,7 +35467,7 @@ function requireUtil () {
 		function parseSourceMapInput(str) {
 		  return JSON.parse(str.replace(/^\)]}'[^\n]*\n/, ''));
 		}
-		exports$1.parseSourceMapInput = parseSourceMapInput;
+		exports.parseSourceMapInput = parseSourceMapInput;
 
 		/**
 		 * Compute the URL of a source given the the source root, the source's
@@ -35457,7 +35520,7 @@ function requireUtil () {
 
 		  return normalize(sourceURL);
 		}
-		exports$1.computeSourceURL = computeSourceURL; 
+		exports.computeSourceURL = computeSourceURL; 
 	} (util));
 	return util;
 }
@@ -36129,15 +36192,15 @@ var hasRequiredBinarySearch;
 function requireBinarySearch () {
 	if (hasRequiredBinarySearch) return binarySearch;
 	hasRequiredBinarySearch = 1;
-	(function (exports$1) {
+	(function (exports) {
 		/*
 		 * Copyright 2011 Mozilla Foundation and contributors
 		 * Licensed under the New BSD license. See LICENSE or:
 		 * http://opensource.org/licenses/BSD-3-Clause
 		 */
 
-		exports$1.GREATEST_LOWER_BOUND = 1;
-		exports$1.LEAST_UPPER_BOUND = 2;
+		exports.GREATEST_LOWER_BOUND = 1;
+		exports.LEAST_UPPER_BOUND = 2;
 
 		/**
 		 * Recursive implementation of binary search.
@@ -36177,7 +36240,7 @@ function requireBinarySearch () {
 
 		    // The exact needle element was not found in this haystack. Determine if
 		    // we are in termination case (3) or (2) and return the appropriate thing.
-		    if (aBias == exports$1.LEAST_UPPER_BOUND) {
+		    if (aBias == exports.LEAST_UPPER_BOUND) {
 		      return aHigh < aHaystack.length ? aHigh : -1;
 		    } else {
 		      return mid;
@@ -36191,7 +36254,7 @@ function requireBinarySearch () {
 		    }
 
 		    // we are in termination case (3) or (2) and return the appropriate thing.
-		    if (aBias == exports$1.LEAST_UPPER_BOUND) {
+		    if (aBias == exports.LEAST_UPPER_BOUND) {
 		      return mid;
 		    } else {
 		      return aLow < 0 ? -1 : aLow;
@@ -36217,13 +36280,13 @@ function requireBinarySearch () {
 		 *     searching for, respectively, if the exact element cannot be found.
 		 *     Defaults to 'binarySearch.GREATEST_LOWER_BOUND'.
 		 */
-		exports$1.search = function search(aNeedle, aHaystack, aCompare, aBias) {
+		exports.search = function search(aNeedle, aHaystack, aCompare, aBias) {
 		  if (aHaystack.length === 0) {
 		    return -1;
 		  }
 
 		  var index = recursiveSearch(-1, aHaystack.length, aNeedle, aHaystack,
-		                              aCompare, aBias || exports$1.GREATEST_LOWER_BOUND);
+		                              aCompare, aBias || exports.GREATEST_LOWER_BOUND);
 		  if (index < 0) {
 		    return -1;
 		  }
@@ -37971,9 +38034,9 @@ var hasRequiredCodeGen;
 function requireCodeGen () {
 	if (hasRequiredCodeGen) return codeGen.exports;
 	hasRequiredCodeGen = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 
 		var _utils = requireUtils$1();
 
@@ -38135,8 +38198,8 @@ function requireCodeGen () {
 		  }
 		};
 
-		exports$1['default'] = CodeGen;
-		module.exports = exports$1['default'];
+		exports['default'] = CodeGen;
+		module.exports = exports['default'];
 		
 	} (codeGen, codeGen.exports));
 	return codeGen.exports;
@@ -38147,9 +38210,9 @@ var hasRequiredJavascriptCompiler;
 function requireJavascriptCompiler () {
 	if (hasRequiredJavascriptCompiler) return javascriptCompiler.exports;
 	hasRequiredJavascriptCompiler = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 		// istanbul ignore next
 
 		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { 'default': obj }; }
@@ -39310,8 +39373,8 @@ function requireJavascriptCompiler () {
 		  }
 		}
 
-		exports$1['default'] = JavaScriptCompiler;
-		module.exports = exports$1['default'];
+		exports['default'] = JavaScriptCompiler;
+		module.exports = exports['default'];
 		
 	} (javascriptCompiler, javascriptCompiler.exports));
 	return javascriptCompiler.exports;
@@ -39322,9 +39385,9 @@ var hasRequiredHandlebars;
 function requireHandlebars () {
 	if (hasRequiredHandlebars) return handlebars.exports;
 	hasRequiredHandlebars = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
-		exports$1.__esModule = true;
+		exports.__esModule = true;
 		// istanbul ignore next
 
 		function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { 'default': obj }; }
@@ -39385,8 +39448,8 @@ function requireHandlebars () {
 
 		inst['default'] = inst;
 
-		exports$1['default'] = inst;
-		module.exports = exports$1['default'];
+		exports['default'] = inst;
+		module.exports = exports['default'];
 		
 	} (handlebars, handlebars.exports));
 	return handlebars.exports;
@@ -58288,7 +58351,7 @@ var hasRequiredMimeTypes;
 function requireMimeTypes () {
 	if (hasRequiredMimeTypes) return mimeTypes;
 	hasRequiredMimeTypes = 1;
-	(function (exports$1) {
+	(function (exports) {
 
 		/**
 		 * Module dependencies.
@@ -58311,16 +58374,16 @@ function requireMimeTypes () {
 		 * @public
 		 */
 
-		exports$1.charset = charset;
-		exports$1.charsets = { lookup: charset };
-		exports$1.contentType = contentType;
-		exports$1.extension = extension;
-		exports$1.extensions = Object.create(null);
-		exports$1.lookup = lookup;
-		exports$1.types = Object.create(null);
+		exports.charset = charset;
+		exports.charsets = { lookup: charset };
+		exports.contentType = contentType;
+		exports.extension = extension;
+		exports.extensions = Object.create(null);
+		exports.lookup = lookup;
+		exports.types = Object.create(null);
 
 		// Populate the extensions/types maps
-		populateMaps(exports$1.extensions, exports$1.types);
+		populateMaps(exports.extensions, exports.types);
 
 		/**
 		 * Get the default charset for a MIME type.
@@ -58364,7 +58427,7 @@ function requireMimeTypes () {
 		  }
 
 		  var mime = str.indexOf('/') === -1
-		    ? exports$1.lookup(str)
+		    ? exports.lookup(str)
 		    : str;
 
 		  if (!mime) {
@@ -58373,7 +58436,7 @@ function requireMimeTypes () {
 
 		  // TODO: use content-type or other module
 		  if (mime.indexOf('charset') === -1) {
-		    var charset = exports$1.charset(mime);
+		    var charset = exports.charset(mime);
 		    if (charset) mime += '; charset=' + charset.toLowerCase();
 		  }
 
@@ -58396,7 +58459,7 @@ function requireMimeTypes () {
 		  var match = EXTRACT_TYPE_REGEXP.exec(type);
 
 		  // get extensions
-		  var exts = match && exports$1.extensions[match[1].toLowerCase()];
+		  var exts = match && exports.extensions[match[1].toLowerCase()];
 
 		  if (!exts || !exts.length) {
 		    return false
@@ -58426,7 +58489,7 @@ function requireMimeTypes () {
 		    return false
 		  }
 
-		  return exports$1.types[extension] || false
+		  return exports.types[extension] || false
 		}
 
 		/**
@@ -60854,7 +60917,7 @@ var hasRequiredQueryString;
 function requireQueryString () {
 	if (hasRequiredQueryString) return queryString;
 	hasRequiredQueryString = 1;
-	(function (exports$1) {
+	(function (exports) {
 		const strictUriEncode = requireStrictUriEncode();
 		const decodeComponent = requireDecodeUriComponent();
 		const splitOnFirst = requireSplitOnFirst();
@@ -61213,10 +61276,10 @@ function requireQueryString () {
 			}, Object.create(null));
 		}
 
-		exports$1.extract = extract;
-		exports$1.parse = parse;
+		exports.extract = extract;
+		exports.parse = parse;
 
-		exports$1.stringify = (object, options) => {
+		exports.stringify = (object, options) => {
 			if (!object) {
 				return '';
 			}
@@ -61276,7 +61339,7 @@ function requireQueryString () {
 			}).filter(x => x.length > 0).join('&');
 		};
 
-		exports$1.parseUrl = (url, options) => {
+		exports.parseUrl = (url, options) => {
 			options = Object.assign({
 				decode: true
 			}, options);
@@ -61292,7 +61355,7 @@ function requireQueryString () {
 			);
 		};
 
-		exports$1.stringifyUrl = (object, options) => {
+		exports.stringifyUrl = (object, options) => {
 			options = Object.assign({
 				encode: true,
 				strict: true,
@@ -61300,11 +61363,11 @@ function requireQueryString () {
 			}, options);
 
 			const url = removeHash(object.url).split('?')[0] || '';
-			const queryFromUrl = exports$1.extract(object.url);
-			const parsedQueryFromUrl = exports$1.parse(queryFromUrl, {sort: false});
+			const queryFromUrl = exports.extract(object.url);
+			const parsedQueryFromUrl = exports.parse(queryFromUrl, {sort: false});
 
 			const query = Object.assign(parsedQueryFromUrl, object.query);
-			let queryString = exports$1.stringify(query, options);
+			let queryString = exports.stringify(query, options);
 			if (queryString) {
 				queryString = `?${queryString}`;
 			}
@@ -61317,24 +61380,24 @@ function requireQueryString () {
 			return `${url}${queryString}${hash}`;
 		};
 
-		exports$1.pick = (input, filter, options) => {
+		exports.pick = (input, filter, options) => {
 			options = Object.assign({
 				parseFragmentIdentifier: true,
 				[encodeFragmentIdentifier]: false
 			}, options);
 
-			const {url, query, fragmentIdentifier} = exports$1.parseUrl(input, options);
-			return exports$1.stringifyUrl({
+			const {url, query, fragmentIdentifier} = exports.parseUrl(input, options);
+			return exports.stringifyUrl({
 				url,
 				query: filterObject(query, filter),
 				fragmentIdentifier
 			}, options);
 		};
 
-		exports$1.exclude = (input, filter, options) => {
+		exports.exclude = (input, filter, options) => {
 			const exclusionFilter = Array.isArray(filter) ? key => !filter.includes(key) : (key, value) => !filter(key, value);
 
-			return exports$1.pick(input, exclusionFilter, options);
+			return exports.pick(input, exclusionFilter, options);
 		}; 
 	} (queryString));
 	return queryString;
@@ -67097,11 +67160,11 @@ var hasRequiredDist;
 function requireDist () {
 	if (hasRequiredDist) return dist.exports;
 	hasRequiredDist = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 		/// <reference lib="es2018"/>
 		/// <reference lib="dom"/>
 		/// <reference types="node"/>
-		Object.defineProperty(exports$1, "__esModule", { value: true });
+		Object.defineProperty(exports, "__esModule", { value: true });
 		const typedArrayTypeNames = [
 		    'Int8Array',
 		    'Uint8Array',
@@ -67401,7 +67464,7 @@ function requireDist () {
 		        throw new TypeError(`Expected value which is \`${description}\`, ${valuesMessage}.`);
 		    }
 		};
-		exports$1.assert = {
+		exports.assert = {
 		    // Unknowns.
 		    undefined: (value) => assertType(is.undefined(value), 'undefined', value),
 		    string: (value) => assertType(is.string(value), 'string', value),
@@ -67514,22 +67577,22 @@ function requireDist () {
 		        value: is.null_
 		    }
 		});
-		Object.defineProperties(exports$1.assert, {
+		Object.defineProperties(exports.assert, {
 		    class: {
-		        value: exports$1.assert.class_
+		        value: exports.assert.class_
 		    },
 		    function: {
-		        value: exports$1.assert.function_
+		        value: exports.assert.function_
 		    },
 		    null: {
-		        value: exports$1.assert.null_
+		        value: exports.assert.null_
 		    }
 		});
-		exports$1.default = is;
+		exports.default = is;
 		// For CommonJS default export support
 		module.exports = is;
 		module.exports.default = is;
-		module.exports.assert = exports$1.assert; 
+		module.exports.assert = exports.assert; 
 	} (dist, dist.exports));
 	return dist.exports;
 }
@@ -67669,8 +67732,8 @@ var hasRequiredSource$4;
 function requireSource$4 () {
 	if (hasRequiredSource$4) return source$3.exports;
 	hasRequiredSource$4 = 1;
-	(function (module, exports$1) {
-		Object.defineProperty(exports$1, "__esModule", { value: true });
+	(function (module, exports) {
+		Object.defineProperty(exports, "__esModule", { value: true });
 		function isTLSSocket(socket) {
 		    return socket.encrypted;
 		}
@@ -67712,7 +67775,7 @@ function requireSource$4 () {
 		        listeners.close(socket._hadError);
 		    }
 		};
-		exports$1.default = deferToConnect;
+		exports.default = deferToConnect;
 		// For CommonJS default export support
 		module.exports = deferToConnect;
 		module.exports.default = deferToConnect; 
@@ -67725,8 +67788,8 @@ var hasRequiredSource$3;
 function requireSource$3 () {
 	if (hasRequiredSource$3) return source$4.exports;
 	hasRequiredSource$3 = 1;
-	(function (module, exports$1) {
-		Object.defineProperty(exports$1, "__esModule", { value: true });
+	(function (module, exports) {
+		Object.defineProperty(exports, "__esModule", { value: true });
 		const defer_to_connect_1 = requireSource$4();
 		const util_1 = require$$1;
 		const nodejsMajorVersion = Number(process.versions.node.split('.')[0]);
@@ -67847,7 +67910,7 @@ function requireSource$3 () {
 		    });
 		    return timings;
 		};
-		exports$1.default = timer;
+		exports.default = timer;
 		// For CommonJS default export support
 		module.exports = timer;
 		module.exports.default = timer; 
@@ -72892,19 +72955,19 @@ var hasRequiredDnsIpVersion;
 function requireDnsIpVersion () {
 	if (hasRequiredDnsIpVersion) return dnsIpVersion;
 	hasRequiredDnsIpVersion = 1;
-	(function (exports$1) {
-		Object.defineProperty(exports$1, "__esModule", { value: true });
-		exports$1.dnsLookupIpVersionToFamily = exports$1.isDnsLookupIpVersion = void 0;
+	(function (exports) {
+		Object.defineProperty(exports, "__esModule", { value: true });
+		exports.dnsLookupIpVersionToFamily = exports.isDnsLookupIpVersion = void 0;
 		const conversionTable = {
 		    auto: 0,
 		    ipv4: 4,
 		    ipv6: 6
 		};
-		exports$1.isDnsLookupIpVersion = (value) => {
+		exports.isDnsLookupIpVersion = (value) => {
 		    return value in conversionTable;
 		};
-		exports$1.dnsLookupIpVersionToFamily = (dnsLookupIpVersion) => {
-		    if (exports$1.isDnsLookupIpVersion(dnsLookupIpVersion)) {
+		exports.dnsLookupIpVersionToFamily = (dnsLookupIpVersion) => {
+		    if (exports.isDnsLookupIpVersion(dnsLookupIpVersion)) {
 		        return conversionTable[dnsLookupIpVersion];
 		    }
 		    throw new Error('Invalid DNS lookup IP version');
@@ -73082,9 +73145,9 @@ var hasRequiredCore;
 function requireCore () {
 	if (hasRequiredCore) return core;
 	hasRequiredCore = 1;
-	(function (exports$1) {
-		Object.defineProperty(exports$1, "__esModule", { value: true });
-		exports$1.UnsupportedProtocolError = exports$1.ReadError = exports$1.TimeoutError = exports$1.UploadError = exports$1.CacheError = exports$1.HTTPError = exports$1.MaxRedirectsError = exports$1.RequestError = exports$1.setNonEnumerableProperties = exports$1.knownHookEvents = exports$1.withoutBody = exports$1.kIsNormalizedAlready = void 0;
+	(function (exports) {
+		Object.defineProperty(exports, "__esModule", { value: true });
+		exports.UnsupportedProtocolError = exports.ReadError = exports.TimeoutError = exports.UploadError = exports.CacheError = exports.HTTPError = exports.MaxRedirectsError = exports.RequestError = exports.setNonEnumerableProperties = exports.knownHookEvents = exports.withoutBody = exports.kIsNormalizedAlready = void 0;
 		const util_1 = require$$1;
 		const stream_1 = require$$0$8;
 		const fs_1 = fs__default;
@@ -73131,10 +73194,10 @@ function requireCore () {
 		const kJobs = Symbol('jobs');
 		const kOriginalResponse = Symbol('originalResponse');
 		const kRetryTimeout = Symbol('retryTimeout');
-		exports$1.kIsNormalizedAlready = Symbol('isNormalizedAlready');
+		exports.kIsNormalizedAlready = Symbol('isNormalizedAlready');
 		const supportsBrotli = is_1.default.string(process.versions.brotli);
-		exports$1.withoutBody = new Set(['GET', 'HEAD']);
-		exports$1.knownHookEvents = [
+		exports.withoutBody = new Set(['GET', 'HEAD']);
+		exports.knownHookEvents = [
 		    'init',
 		    'beforeRequest',
 		    'beforeRedirect',
@@ -73177,7 +73240,7 @@ function requireCore () {
 		    'json',
 		    'form'
 		];
-		exports$1.setNonEnumerableProperties = (sources, to) => {
+		exports.setNonEnumerableProperties = (sources, to) => {
 		    // Non enumerable properties shall not be merged
 		    const properties = {};
 		    for (const source of sources) {
@@ -73248,7 +73311,7 @@ function requireCore () {
 		        }
 		    }
 		}
-		exports$1.RequestError = RequestError;
+		exports.RequestError = RequestError;
 		/**
 		An error to be thrown when the server redirects you more than ten times.
 		Includes a `response` property.
@@ -73260,7 +73323,7 @@ function requireCore () {
 		        this.code = 'ERR_TOO_MANY_REDIRECTS';
 		    }
 		}
-		exports$1.MaxRedirectsError = MaxRedirectsError;
+		exports.MaxRedirectsError = MaxRedirectsError;
 		/**
 		An error to be thrown when the server response code is not 2xx nor 3xx if `options.followRedirect` is `true`, but always except for 304.
 		Includes a `response` property.
@@ -73272,7 +73335,7 @@ function requireCore () {
 		        this.code = 'ERR_NON_2XX_3XX_RESPONSE';
 		    }
 		}
-		exports$1.HTTPError = HTTPError;
+		exports.HTTPError = HTTPError;
 		/**
 		An error to be thrown when a cache method fails.
 		For example, if the database goes down or there's a filesystem error.
@@ -73284,7 +73347,7 @@ function requireCore () {
 		        this.code = this.code === 'ERR_GOT_REQUEST_ERROR' ? 'ERR_CACHE_ACCESS' : this.code;
 		    }
 		}
-		exports$1.CacheError = CacheError;
+		exports.CacheError = CacheError;
 		/**
 		An error to be thrown when the request body is a stream and an error occurs while reading from that stream.
 		*/
@@ -73295,7 +73358,7 @@ function requireCore () {
 		        this.code = this.code === 'ERR_GOT_REQUEST_ERROR' ? 'ERR_UPLOAD' : this.code;
 		    }
 		}
-		exports$1.UploadError = UploadError;
+		exports.UploadError = UploadError;
 		/**
 		An error to be thrown when the request is aborted due to a timeout.
 		Includes an `event` and `timings` property.
@@ -73308,7 +73371,7 @@ function requireCore () {
 		        this.timings = timings;
 		    }
 		}
-		exports$1.TimeoutError = TimeoutError;
+		exports.TimeoutError = TimeoutError;
 		/**
 		An error to be thrown when reading from response stream fails.
 		*/
@@ -73319,7 +73382,7 @@ function requireCore () {
 		        this.code = this.code === 'ERR_GOT_REQUEST_ERROR' ? 'ERR_READING_RESPONSE_STREAM' : this.code;
 		    }
 		}
-		exports$1.ReadError = ReadError;
+		exports.ReadError = ReadError;
 		/**
 		An error to be thrown when given an unsupported protocol.
 		*/
@@ -73330,7 +73393,7 @@ function requireCore () {
 		        this.code = 'ERR_UNSUPPORTED_PROTOCOL';
 		    }
 		}
-		exports$1.UnsupportedProtocolError = UnsupportedProtocolError;
+		exports.UnsupportedProtocolError = UnsupportedProtocolError;
 		const proxiedRequestEvents = [
 		    'socket',
 		    'connect',
@@ -73385,7 +73448,7 @@ function requireCore () {
 		        if (json || body || form) {
 		            this._lockWrite();
 		        }
-		        if (exports$1.kIsNormalizedAlready in options) {
+		        if (exports.kIsNormalizedAlready in options) {
 		            this.options = options;
 		        }
 		        else {
@@ -73704,7 +73767,7 @@ function requireCore () {
 		        // `options.hooks`
 		        const areHooksDefault = options.hooks === (defaults === null || defaults === void 0 ? void 0 : defaults.hooks);
 		        options.hooks = { ...options.hooks };
-		        for (const event of exports$1.knownHookEvents) {
+		        for (const event of exports.knownHookEvents) {
 		            if (event in options.hooks) {
 		                if (is_1.default.array(options.hooks[event])) {
 		                    // See https://github.com/microsoft/TypeScript/issues/31445#issuecomment-576929044
@@ -73719,7 +73782,7 @@ function requireCore () {
 		            }
 		        }
 		        if (defaults && !areHooksDefault) {
-		            for (const event of exports$1.knownHookEvents) {
+		            for (const event of exports.knownHookEvents) {
 		                const defaultHooks = defaults.hooks[event];
 		                if (defaultHooks.length > 0) {
 		                    // See https://github.com/microsoft/TypeScript/issues/31445#issuecomment-576929044
@@ -73772,7 +73835,7 @@ function requireCore () {
 		        }
 		        options.maxRedirects = (_e = options.maxRedirects) !== null && _e !== void 0 ? _e : 0;
 		        // Set non-enumerable properties
-		        exports$1.setNonEnumerableProperties([defaults, rawOptions], options);
+		        exports.setNonEnumerableProperties([defaults, rawOptions], options);
 		        return normalize_arguments_1.default(options, defaults);
 		    }
 		    _lockWrite() {
@@ -73793,7 +73856,7 @@ function requireCore () {
 		        const isJSON = !is_1.default.undefined(options.json);
 		        const isBody = !is_1.default.undefined(options.body);
 		        const hasPayload = isForm || isJSON || isBody;
-		        const cannotHaveBody = exports$1.withoutBody.has(options.method) && !(options.method === 'GET' && options.allowGetBody);
+		        const cannotHaveBody = exports.withoutBody.has(options.method) && !(options.method === 'GET' && options.allowGetBody);
 		        this._cannotHaveBody = cannotHaveBody;
 		        if (hasPayload) {
 		            if (cannotHaveBody) {
@@ -74586,7 +74649,7 @@ function requireCore () {
 		        return this;
 		    }
 		}
-		exports$1.default = Request; 
+		exports.default = Request; 
 	} (core));
 	return core;
 }
@@ -74596,7 +74659,7 @@ var hasRequiredTypes$1;
 function requireTypes$1 () {
 	if (hasRequiredTypes$1) return types$1;
 	hasRequiredTypes$1 = 1;
-	(function (exports$1) {
+	(function (exports) {
 		var __createBinding = (types$1 && types$1.__createBinding) || (Object.create ? (function(o, m, k, k2) {
 		    if (k2 === undefined) k2 = k;
 		    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
@@ -74604,11 +74667,11 @@ function requireTypes$1 () {
 		    if (k2 === undefined) k2 = k;
 		    o[k2] = m[k];
 		}));
-		var __exportStar = (types$1 && types$1.__exportStar) || function(m, exports$1) {
-		    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports$1, p)) __createBinding(exports$1, m, p);
+		var __exportStar = (types$1 && types$1.__exportStar) || function(m, exports) {
+		    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 		};
-		Object.defineProperty(exports$1, "__esModule", { value: true });
-		exports$1.CancelError = exports$1.ParseError = void 0;
+		Object.defineProperty(exports, "__esModule", { value: true });
+		exports.CancelError = exports.ParseError = void 0;
 		const core_1 = /*@__PURE__*/ requireCore();
 		/**
 		An error to be thrown when server response code is 2xx, and parsing body fails.
@@ -74622,7 +74685,7 @@ function requireTypes$1 () {
 		        this.code = this.code === 'ERR_GOT_REQUEST_ERROR' ? 'ERR_BODY_PARSE_FAILURE' : this.code;
 		    }
 		}
-		exports$1.ParseError = ParseError;
+		exports.ParseError = ParseError;
 		/**
 		An error to be thrown when the request is aborted with `.cancel()`.
 		*/
@@ -74636,8 +74699,8 @@ function requireTypes$1 () {
 		        return true;
 		    }
 		}
-		exports$1.CancelError = CancelError;
-		__exportStar(/*@__PURE__*/ requireCore(), exports$1); 
+		exports.CancelError = CancelError;
+		__exportStar(/*@__PURE__*/ requireCore(), exports); 
 	} (types$1));
 	return types$1;
 }
@@ -74681,7 +74744,7 @@ var hasRequiredAsPromise;
 function requireAsPromise () {
 	if (hasRequiredAsPromise) return asPromise;
 	hasRequiredAsPromise = 1;
-	(function (exports$1) {
+	(function (exports) {
 		var __createBinding = (asPromise && asPromise.__createBinding) || (Object.create ? (function(o, m, k, k2) {
 		    if (k2 === undefined) k2 = k;
 		    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
@@ -74689,10 +74752,10 @@ function requireAsPromise () {
 		    if (k2 === undefined) k2 = k;
 		    o[k2] = m[k];
 		}));
-		var __exportStar = (asPromise && asPromise.__exportStar) || function(m, exports$1) {
-		    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports$1, p)) __createBinding(exports$1, m, p);
+		var __exportStar = (asPromise && asPromise.__exportStar) || function(m, exports) {
+		    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 		};
-		Object.defineProperty(exports$1, "__esModule", { value: true });
+		Object.defineProperty(exports, "__esModule", { value: true });
 		const events_1 = require$$0$1;
 		const is_1 = /*@__PURE__*/ requireDist();
 		const PCancelable = requirePCancelable();
@@ -74855,8 +74918,8 @@ function requireAsPromise () {
 		    promise.text = () => shortcut('text');
 		    return promise;
 		}
-		exports$1.default = asPromise$1;
-		__exportStar(/*@__PURE__*/ requireTypes$1(), exports$1); 
+		exports.default = asPromise$1;
+		__exportStar(/*@__PURE__*/ requireTypes$1(), exports); 
 	} (asPromise));
 	return asPromise;
 }
@@ -74937,7 +75000,7 @@ var hasRequiredCreate;
 function requireCreate () {
 	if (hasRequiredCreate) return create;
 	hasRequiredCreate = 1;
-	(function (exports$1) {
+	(function (exports) {
 		var __createBinding = (create && create.__createBinding) || (Object.create ? (function(o, m, k, k2) {
 		    if (k2 === undefined) k2 = k;
 		    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
@@ -74945,11 +75008,11 @@ function requireCreate () {
 		    if (k2 === undefined) k2 = k;
 		    o[k2] = m[k];
 		}));
-		var __exportStar = (create && create.__exportStar) || function(m, exports$1) {
-		    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports$1, p)) __createBinding(exports$1, m, p);
+		var __exportStar = (create && create.__exportStar) || function(m, exports) {
+		    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 		};
-		Object.defineProperty(exports$1, "__esModule", { value: true });
-		exports$1.defaultHandler = void 0;
+		Object.defineProperty(exports, "__esModule", { value: true });
+		exports.defaultHandler = void 0;
 		const is_1 = /*@__PURE__*/ requireDist();
 		const as_promise_1 = /*@__PURE__*/ requireAsPromise();
 		const create_rejection_1 = /*@__PURE__*/ requireCreateRejection();
@@ -74989,7 +75052,7 @@ function requireCreate () {
 		    'head',
 		    'delete'
 		];
-		exports$1.defaultHandler = (options, next) => next(options);
+		exports.defaultHandler = (options, next) => next(options);
 		const callInitHooks = (hooks, options) => {
 		    if (hooks) {
 		        for (const hook of hooks) {
@@ -75082,9 +75145,9 @@ function requireCreate () {
 		                isMutableDefaults = value.mutableDefaults;
 		            }
 		        }
-		        handlers = handlers.filter(handler => handler !== exports$1.defaultHandler);
+		        handlers = handlers.filter(handler => handler !== exports.defaultHandler);
 		        if (handlers.length === 0) {
-		            handlers.push(exports$1.defaultHandler);
+		            handlers.push(exports.defaultHandler);
 		        }
 		        return create$1({
 		            options: mergeOptions(...optionsArray),
@@ -75175,8 +75238,8 @@ function requireCreate () {
 		    got.mergeOptions = mergeOptions;
 		    return got;
 		};
-		exports$1.default = create$1;
-		__exportStar(/*@__PURE__*/ requireTypes(), exports$1); 
+		exports.default = create$1;
+		__exportStar(/*@__PURE__*/ requireTypes(), exports); 
 	} (create));
 	return create;
 }
@@ -75188,7 +75251,7 @@ var hasRequiredSource;
 function requireSource () {
 	if (hasRequiredSource) return source$5.exports;
 	hasRequiredSource = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 		var __createBinding = (source && source.__createBinding) || (Object.create ? (function(o, m, k, k2) {
 		    if (k2 === undefined) k2 = k;
 		    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
@@ -75196,10 +75259,10 @@ function requireSource () {
 		    if (k2 === undefined) k2 = k;
 		    o[k2] = m[k];
 		}));
-		var __exportStar = (source && source.__exportStar) || function(m, exports$1) {
-		    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports$1, p)) __createBinding(exports$1, m, p);
+		var __exportStar = (source && source.__exportStar) || function(m, exports) {
+		    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 		};
-		Object.defineProperty(exports$1, "__esModule", { value: true });
+		Object.defineProperty(exports, "__esModule", { value: true });
 		const url_1 = require$$0$9;
 		const create_1 = /*@__PURE__*/ requireCreate();
 		const defaults = {
@@ -75313,13 +75376,13 @@ function requireSource () {
 		    mutableDefaults: false
 		};
 		const got = create_1.default(defaults);
-		exports$1.default = got;
+		exports.default = got;
 		// For CommonJS default export support
 		module.exports = got;
 		module.exports.default = got;
 		module.exports.__esModule = true; // Workaround for TS issue: https://github.com/sindresorhus/got/pull/1267
-		__exportStar(/*@__PURE__*/ requireCreate(), exports$1);
-		__exportStar(/*@__PURE__*/ requireAsPromise(), exports$1); 
+		__exportStar(/*@__PURE__*/ requireCreate(), exports);
+		__exportStar(/*@__PURE__*/ requireAsPromise(), exports); 
 	} (source$5, source$5.exports));
 	return source$5.exports;
 }
@@ -79712,7 +79775,7 @@ var hasRequiredLight;
 function requireLight () {
 	if (hasRequiredLight) return light$1.exports;
 	hasRequiredLight = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 		(function (global, factory) {
 			module.exports = factory() ;
 		}(light, (function () {
@@ -82399,7 +82462,7 @@ var hasRequiredRe;
 function requireRe () {
 	if (hasRequiredRe) return re.exports;
 	hasRequiredRe = 1;
-	(function (module, exports$1) {
+	(function (module, exports) {
 
 		const {
 		  MAX_SAFE_COMPONENT_LENGTH,
@@ -82407,14 +82470,14 @@ function requireRe () {
 		  MAX_LENGTH,
 		} = requireConstants();
 		const debug = requireDebug();
-		exports$1 = module.exports = {};
+		exports = module.exports = {};
 
 		// The actual regexps go on exports.re
-		const re = exports$1.re = [];
-		const safeRe = exports$1.safeRe = [];
-		const src = exports$1.src = [];
-		const safeSrc = exports$1.safeSrc = [];
-		const t = exports$1.t = {};
+		const re = exports.re = [];
+		const safeRe = exports.safeRe = [];
+		const src = exports.src = [];
+		const safeSrc = exports.safeSrc = [];
+		const t = exports.t = {};
 		let R = 0;
 
 		const LETTERDASHNUMBER = '[a-zA-Z0-9-]';
@@ -82578,7 +82641,7 @@ function requireRe () {
 		createToken('LONETILDE', '(?:~>?)');
 
 		createToken('TILDETRIM', `(\\s*)${src[t.LONETILDE]}\\s+`, true);
-		exports$1.tildeTrimReplace = '$1~';
+		exports.tildeTrimReplace = '$1~';
 
 		createToken('TILDE', `^${src[t.LONETILDE]}${src[t.XRANGEPLAIN]}$`);
 		createToken('TILDELOOSE', `^${src[t.LONETILDE]}${src[t.XRANGEPLAINLOOSE]}$`);
@@ -82588,7 +82651,7 @@ function requireRe () {
 		createToken('LONECARET', '(?:\\^)');
 
 		createToken('CARETTRIM', `(\\s*)${src[t.LONECARET]}\\s+`, true);
-		exports$1.caretTrimReplace = '$1^';
+		exports.caretTrimReplace = '$1^';
 
 		createToken('CARET', `^${src[t.LONECARET]}${src[t.XRANGEPLAIN]}$`);
 		createToken('CARETLOOSE', `^${src[t.LONECARET]}${src[t.XRANGEPLAINLOOSE]}$`);
@@ -82601,7 +82664,7 @@ function requireRe () {
 		// it modifies, so that `> 1.2.3` ==> `>1.2.3`
 		createToken('COMPARATORTRIM', `(\\s*)${src[t.GTLT]
 		}\\s*(${src[t.LOOSEPLAIN]}|${src[t.XRANGEPLAIN]})`, true);
-		exports$1.comparatorTrimReplace = '$1$2$3';
+		exports.comparatorTrimReplace = '$1$2$3';
 
 		// Something like `1.2.3 - 1.2.4`
 		// Note that these all use the loose form, because they'll be
