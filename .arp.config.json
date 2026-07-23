@@ -22,7 +22,8 @@
       "versionPrefix": "v",
       "versionPatterns": [
         "ZeroWiggliness/another-release-please-action@([^<]+)"
-      ]
+      ],
+      "replaceAll": true
     }
   ]
 }
