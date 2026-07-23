@@ -9,6 +9,7 @@
   },
   "versionPrefix": "v",
   "version": "v0.2.2",
+  "updateAllVersions": true,
   "manifests": [
     {
       "path": ".",
@@ -18,7 +19,7 @@
     {
       "path": "README.md",
       "filetype": "text",
-      "version": "v0.2.1",
+      "version": "v0.2.2",
       "versionPrefix": "v",
       "versionPatterns": [
         "ZeroWiggliness/another-release-please-action@([^<]+)"

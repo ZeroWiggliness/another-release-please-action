@@ -124,7 +124,7 @@ jobs:
 
       - name: Run another-release-please
         id: arp
-        uses: ZeroWiggliness/another-release-please-action@v1
+        uses: ZeroWiggliness/another-release-please-action@v0.2.2
         with:
           command: release,release-pr
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -146,7 +146,7 @@ action, use a tagged version such as `@v1`.
 ```yaml
 steps:
   - uses: actions/checkout@v4
-  - uses: ZeroWiggliness/another-release-please-action@v1
+  - uses: ZeroWiggliness/another-release-please-action@v0.2.2
 ```
 
 ### Create or refresh a release PR only
@@ -154,7 +154,7 @@ steps:
 ```yaml
 steps:
   - uses: actions/checkout@v4
-  - uses: ZeroWiggliness/another-release-please-action@v1
+  - uses: ZeroWiggliness/another-release-please-action@v0.2.2
     with:
       command: release-pr
 ```
@@ -164,7 +164,7 @@ steps:
 ```yaml
 steps:
   - uses: actions/checkout@v4
-  - uses: ZeroWiggliness/another-release-please-action@v1
+  - uses: ZeroWiggliness/another-release-please-action@v0.2.2
     with:
       command: release
 ```
@@ -174,7 +174,7 @@ steps:
 ```yaml
 steps:
   - uses: actions/checkout@v4
-  - uses: ZeroWiggliness/another-release-please-action@v1
+  - uses: ZeroWiggliness/another-release-please-action@v0.2.2
     with:
       command: calculate-next
 ```
@@ -184,7 +184,7 @@ steps:
 ```yaml
 steps:
   - uses: actions/checkout@v4
-  - uses: ZeroWiggliness/another-release-please-action@v1
+  - uses: ZeroWiggliness/another-release-please-action@v0.2.2
     with:
       command: calculate-next
 ```
@@ -234,7 +234,7 @@ Example:
 steps:
   - uses: actions/checkout@v4
   - id: arp
-    uses: ZeroWiggliness/another-release-please-action@v1
+    uses: ZeroWiggliness/another-release-please-action@v0.2.2
   - if: steps.arp.outputs.created == 'true'
     run: echo "Released ${{ steps.arp.outputs.current-version }}"
   - name: Show collected versions
@@ -252,7 +252,7 @@ comma-separated list of [minimatch](https://github.com/isaacs/minimatch) glob
 patterns to limit execution to specific branches only.
 
 ```yaml
-- uses: ZeroWiggliness/another-release-please-action@v1
+- uses: ZeroWiggliness/another-release-please-action@v0.2.2
   with:
     release-branches: master
 ```
@@ -276,7 +276,7 @@ no other outputs are produced.
 For a multi-branch workflow where only certain branches should produce releases:
 
 ```yaml
-- uses: ZeroWiggliness/another-release-please-action@v1
+- uses: ZeroWiggliness/another-release-please-action@v0.2.2
   with:
     release-branches: master,release/v*
 ```
