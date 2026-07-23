@@ -8,12 +8,12 @@
     "includeChores": false
   },
   "versionPrefix": "v",
-  "version": "v0.2.1",
+  "version": "v0.2.2",
   "manifests": [
     {
       "path": ".",
       "type": "simple",
-      "version": "0.2.1"
+      "version": "0.2.2"
     },
     {
       "path": "README.md",

@@ -1,3 +1,11 @@
+## v0.2.2
+
+### Bug Fixes
+* *(dep)* update dependencies and version patterns in configuration ([#26](https://github.com/ZeroWiggliness/another-release-please-action/issues/26)) ([2f01190](https://github.com/ZeroWiggliness/another-release-please-action/commit/2f01190ea4ed834ad0c12d58a70fbfdd3090e635))
+
+---
+_Generated on 2026-07-23_
+
 ## v0.2.1
 
 ### Bug Fixes
