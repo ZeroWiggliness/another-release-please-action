@@ -40,7 +40,7 @@
   "dependencies": {
     "@actions/core": "^3.0.1",
     "@zerowiggliness/another-release-please": "^0.1.4",
-    "minimatch": "^10.2.5"
+    "minimatch": "^10.2.6"
   },
   "devDependencies": {
     "@eslint/compat": "^2.1.0",
