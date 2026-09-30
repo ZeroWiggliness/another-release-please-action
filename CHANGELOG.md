@@ -1,3 +1,12 @@
+## v0.2.3
+
+### Bug Fixes
+* *(dep)* Bump actions/setup-node from 6 to 7 ([#28](https://github.com/ZeroWiggliness/another-release-please-action/issues/28)) ([6a08c04](https://github.com/ZeroWiggliness/another-release-please-action/commit/6a08c0458812467c5beb6ffac3e0541215def68b))
+* update all versions ([#39](https://github.com/ZeroWiggliness/another-release-please-action/issues/39)) ([c89df3d](https://github.com/ZeroWiggliness/another-release-please-action/commit/c89df3d0049651a432e63d6712ca0dfea1153181))
+
+---
+_Generated on 2026-09-30_
+
 ## v0.2.2
 
 ### Bug Fixes
