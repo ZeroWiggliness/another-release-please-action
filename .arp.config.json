@@ -8,18 +8,18 @@
     "includeChores": false
   },
   "versionPrefix": "v",
-  "version": "v0.2.3",
+  "version": "v0.2.4",
   "updateAllVersions": true,
   "manifests": [
     {
       "path": ".",
       "type": "simple",
-      "version": "0.2.3"
+      "version": "0.2.4"
     },
     {
       "path": "README.md",
       "filetype": "text",
-      "version": "v0.2.3",
+      "version": "v0.2.4",
       "versionPrefix": "v",
       "versionPatterns": [
         "ZeroWiggliness/another-release-please-action@([^<]+)"
