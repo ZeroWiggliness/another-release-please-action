@@ -1,3 +1,11 @@
+## v0.2.4
+
+### Bug Fixes
+* *(dep)* Bump the npm-development group across 1 directory with 10 updates ([#45](https://github.com/ZeroWiggliness/another-release-please-action/issues/45)) ([68fb744](https://github.com/ZeroWiggliness/another-release-please-action/commit/68fb744b20cac46ddd1491271215ff6f80ff88e1))
+
+---
+_Generated on 2026-10-26_
+
 ## v0.2.3
 
 ### Bug Fixes
