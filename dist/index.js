@@ -2485,11 +2485,77 @@ function requireRequest$1 () {
 	    }
 	  }
 
-	  onUpgrade (statusCode, headers, socket) {
+	  /**
+	   * @param {number|null} statusCode
+	   * @param {Buffer[]|null} headers
+	   * @param {import('node:stream').Duplex} socket
+	   * @param {string} [statusText]
+	   */
+	  onUpgrade (statusCode, headers, socket, statusText = '') {
+	    this.onFinally();
+
 	    assert(!this.aborted);
 	    assert(!this.completed);
 
-	    return this[kHandler].onUpgrade(statusCode, headers, socket)
+	    if (statusCode !== null) {
+	      this.#publishUpgradeHeaders(statusCode, headers, statusText);
+	    }
+
+	    const result = this[kHandler].onUpgrade(statusCode, headers, socket);
+
+	    if (!this.aborted) {
+	      this.completed = true;
+	      if (statusCode !== null) {
+	        this.#publishUpgradeTrailers();
+	      }
+	    }
+
+	    return result
+	  }
+
+	  /**
+	   * @param {number} statusCode
+	   * @param {import('node:http2').IncomingHttpHeaders} headers
+	   * @param {(headers: import('node:http2').IncomingHttpHeaders) => Buffer[]} parseHeaders
+	   * @param {string} [statusText]
+	   */
+	  onUpgradeResponse (statusCode, headers, parseHeaders, statusText = '') {
+	    assert(!this.aborted);
+	    assert(this.completed);
+
+	    if (channels.headers.hasSubscribers) {
+	      this.#publishUpgradeHeaders(statusCode, parseHeaders(headers), statusText);
+	    }
+	    this.#publishUpgradeTrailers();
+	  }
+
+	  /**
+	   * @param {Error} error
+	   */
+	  onUpgradeError (error) {
+	    assert(!this.aborted);
+	    assert(this.completed);
+
+	    if (channels.error.hasSubscribers) {
+	      channels.error.publish({ request: this, error });
+	    }
+	  }
+
+	  /**
+	   * @param {number} statusCode
+	   * @param {Buffer[]} headers
+	   * @param {string} statusText
+	   */
+	  #publishUpgradeHeaders (statusCode, headers, statusText) {
+	    if (channels.headers.hasSubscribers) {
+	      channels.headers.publish({ request: this, response: { statusCode, headers, statusText } });
+	    }
+	  }
+
+	  #publishUpgradeTrailers () {
+	    if (channels.trailers.hasSubscribers) {
+	      channels.trailers.publish({ request: this, trailers: [] });
+	    }
 	  }
 
 	  onComplete (trailers) {
@@ -2572,7 +2638,13 @@ function requireRequest$1 () {
 	      } else if (typeof val[i] === 'object') {
 	        throw new InvalidArgumentError(`invalid ${key} header`)
 	      } else {
-	        arr.push(`${val[i]}`);
+	        // Coerce primitives (and reject unsafe coercions such as functions
+	        // with a crafted toString/Symbol.toPrimitive).
+	        const str = `${val[i]}`;
+	        if (!isValidHeaderValue(str)) {
+	          throw new InvalidArgumentError(`invalid ${key} header`)
+	        }
+	        arr.push(str);
 	      }
 	    }
 	    val = arr;
@@ -2583,7 +2655,12 @@ function requireRequest$1 () {
 	  } else if (val === null) {
 	    val = '';
 	  } else {
+	    // Coerce primitives (and reject unsafe coercions such as functions
+	    // with a crafted toString/Symbol.toPrimitive).
 	    val = `${val}`;
+	    if (!isValidHeaderValue(val)) {
+	      throw new InvalidArgumentError(`invalid ${key} header`)
+	    }
 	  }
 
 	  if (headerName === 'host') {
@@ -2708,6 +2785,7 @@ function requireDispatcherBase () {
 	if (hasRequiredDispatcherBase) return dispatcherBase;
 	hasRequiredDispatcherBase = 1;
 
+	const buffer = require$$0$2;
 	const Dispatcher = requireDispatcher();
 	const {
 	  ClientDestroyedError,
@@ -2719,15 +2797,32 @@ function requireDispatcherBase () {
 	const kOnDestroyed = Symbol('onDestroyed');
 	const kOnClosed = Symbol('onClosed');
 	const kInterceptedDispatch = Symbol('Intercepted Dispatch');
+	const kWebSocketOptions = Symbol('webSocketOptions');
+	const kEventSourceOptions = Symbol('eventSourceOptions');
 
 	class DispatcherBase extends Dispatcher {
-	  constructor () {
+	  constructor (opts) {
 	    super();
 
 	    this[kDestroyed] = false;
 	    this[kOnDestroyed] = null;
 	    this[kClosed] = false;
 	    this[kOnClosed] = [];
+	    this[kWebSocketOptions] = opts?.webSocket ?? {};
+	    this[kEventSourceOptions] = opts?.eventSource ?? {};
+	  }
+
+	  get webSocketOptions () {
+	    return {
+	      maxFragments: this[kWebSocketOptions].maxFragments ?? 131072,
+	      maxPayloadSize: this[kWebSocketOptions].maxPayloadSize ?? 128 * 1024 * 1024
+	    }
+	  }
+
+	  get eventSourceOptions () {
+	    return {
+	      maxEventSize: this[kEventSourceOptions].maxEventSize ?? buffer.kStringMaxLength
+	    }
 	  }
 
 	  get destroyed () {
@@ -8630,6 +8725,7 @@ function requireClientH1 () {
 	  RequestContentLengthMismatchError,
 	  ResponseContentLengthMismatchError,
 	  RequestAbortedError,
+	  InvalidArgumentError,
 	  HeadersTimeoutError,
 	  HeadersOverflowError,
 	  SocketError,
@@ -8677,6 +8773,9 @@ function requireClientH1 () {
 	const FastBuffer = Buffer[Symbol.species];
 	const addListener = util.addListener;
 	const removeAllListeners = util.removeAllListeners;
+	const kIdleSocketValidation = Symbol('kIdleSocketValidation');
+	const kIdleSocketValidationTimeout = Symbol('kIdleSocketValidationTimeout');
+	const kSocketUsed = Symbol('kSocketUsed');
 
 	let extractBody;
 
@@ -8899,27 +8998,69 @@ function requireClientH1 () {
 
 	      const offset = llhttp.llhttp_get_error_pos(this.ptr) - currentBufferPtr;
 
-	      if (ret === constants.ERROR.PAUSED_UPGRADE) {
-	        this.onUpgrade(data.slice(offset));
-	      } else if (ret === constants.ERROR.PAUSED) {
-	        this.paused = true;
-	        socket.unshift(data.slice(offset));
-	      } else if (ret !== constants.ERROR.OK) {
-	        const ptr = llhttp.llhttp_get_error_reason(this.ptr);
-	        let message = '';
-	        /* istanbul ignore else: difficult to make a test case for */
-	        if (ptr) {
-	          const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0);
-	          message =
-	            'Response does not match the HTTP/1.1 protocol (' +
-	            Buffer.from(llhttp.memory.buffer, ptr, len).toString() +
-	            ')';
+	      if (ret !== constants.ERROR.OK) {
+	        const body = data.subarray(offset);
+
+	        if (ret === constants.ERROR.PAUSED_UPGRADE) {
+	          this.onUpgrade(body);
+	        } else if (ret === constants.ERROR.PAUSED) {
+	          this.paused = true;
+	          socket.unshift(body);
+	        } else {
+	          throw this.createError(ret, body)
 	        }
-	        throw new HTTPParserError(message, constants.ERROR[ret], data.slice(offset))
 	      }
 	    } catch (err) {
 	      util.destroy(socket, err);
 	    }
+	  }
+
+	  finish () {
+	    assert(currentParser === null);
+	    assert(this.ptr != null);
+	    assert(!this.paused);
+
+	    const { llhttp } = this;
+
+	    let ret;
+
+	    try {
+	      currentParser = this;
+	      ret = llhttp.llhttp_finish(this.ptr);
+	    } finally {
+	      currentParser = null;
+	    }
+
+	    if (ret === constants.ERROR.OK) {
+	      return null
+	    }
+
+	    if (ret === constants.ERROR.PAUSED || ret === constants.ERROR.PAUSED_UPGRADE) {
+	      this.paused = true;
+	      return null
+	    }
+
+	    return this.createError(ret, EMPTY_BUF)
+	  }
+
+	  createError (ret, data) {
+	    const { llhttp, contentLength, bytesRead } = this;
+
+	    if (contentLength && bytesRead !== parseInt(contentLength, 10)) {
+	      return new ResponseContentLengthMismatchError()
+	    }
+
+	    const ptr = llhttp.llhttp_get_error_reason(this.ptr);
+	    let message = '';
+	    if (ptr) {
+	      const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0);
+	      message =
+	        'Response does not match the HTTP/1.1 protocol (' +
+	        Buffer.from(llhttp.memory.buffer, ptr, len).toString() +
+	        ')';
+	    }
+
+	    return new HTTPParserError(message, constants.ERROR[ret], data)
 	  }
 
 	  destroy () {
@@ -8946,6 +9087,11 @@ function requireClientH1 () {
 
 	    /* istanbul ignore next: difficult to make a test case for */
 	    if (socket.destroyed) {
+	      return -1
+	    }
+
+	    if (client[kRunning] === 0) {
+	      util.destroy(socket, new SocketError('bad response', util.getSocketInfo(socket)));
 	      return -1
 	    }
 
@@ -9001,7 +9147,7 @@ function requireClientH1 () {
 	  }
 
 	  onUpgrade (head) {
-	    const { upgrade, client, socket, headers, statusCode } = this;
+	    const { upgrade, client, socket, headers, statusCode, statusText } = this;
 
 	    assert(upgrade);
 	    assert(client[kSocket] === socket);
@@ -9036,9 +9182,10 @@ function requireClientH1 () {
 	    client.emit('disconnect', client[kUrl], [client], new InformationalError('upgrade'));
 
 	    try {
-	      request.onUpgrade(statusCode, headers, socket);
-	    } catch (err) {
-	      util.destroy(socket, err);
+	      request.onUpgrade(statusCode, headers, socket, statusText);
+	    } catch (error) {
+	      util.errorRequest(client, request, error);
+	      util.destroy(socket, error);
 	    }
 
 	    client[kResume]();
@@ -9049,6 +9196,11 @@ function requireClientH1 () {
 
 	    /* istanbul ignore next: difficult to make a test case for */
 	    if (socket.destroyed) {
+	      return -1
+	    }
+
+	    if (client[kRunning] === 0) {
+	      util.destroy(socket, new SocketError('bad response', util.getSocketInfo(socket)));
 	      return -1
 	    }
 
@@ -9225,6 +9377,7 @@ function requireClientH1 () {
 	    request.onComplete(headers);
 
 	    client[kQueue][client[kRunningIdx]++] = null;
+	    socket[kSocketUsed] = true;
 
 	    if (socket[kWriting]) {
 	      assert(client[kRunning] === 0);
@@ -9283,18 +9436,22 @@ function requireClientH1 () {
 	  socket[kWriting] = false;
 	  socket[kReset] = false;
 	  socket[kBlocking] = false;
+	  socket[kIdleSocketValidation] = 0;
+	  socket[kIdleSocketValidationTimeout] = null;
+	  socket[kSocketUsed] = false;
 	  socket[kParser] = new Parser(client, socket, llhttpInstance);
 
 	  addListener(socket, 'error', function (err) {
-	    assert(err.code !== 'ERR_TLS_CERT_ALTNAME_INVALID');
-
 	    const parser = this[kParser];
 
 	    // On Mac OS, we get an ECONNRESET even if there is a full body to be forwarded
 	    // to the user.
 	    if (err.code === 'ECONNRESET' && parser.statusCode && !parser.shouldKeepAlive) {
-	      // We treat all incoming data so for as a valid response.
-	      parser.onMessageComplete();
+	      const parserErr = parser.finish();
+	      if (parserErr) {
+	        this[kError] = parserErr;
+	        this[kClient][kOnError](parserErr);
+	      }
 	      return
 	    }
 
@@ -9313,8 +9470,10 @@ function requireClientH1 () {
 	    const parser = this[kParser];
 
 	    if (parser.statusCode && !parser.shouldKeepAlive) {
-	      // We treat all incoming data so far as a valid response.
-	      parser.onMessageComplete();
+	      const parserErr = parser.finish();
+	      if (parserErr) {
+	        util.destroy(this, parserErr);
+	      }
 	      return
 	    }
 
@@ -9324,10 +9483,11 @@ function requireClientH1 () {
 	    const client = this[kClient];
 	    const parser = this[kParser];
 
+	    clearIdleSocketValidation(this);
+
 	    if (parser) {
 	      if (!this[kError] && parser.statusCode && !parser.shouldKeepAlive) {
-	        // We treat all incoming data so far as a valid response.
-	        parser.onMessageComplete();
+	        this[kError] = parser.finish() || this[kError];
 	      }
 
 	      this[kParser].destroy();
@@ -9390,7 +9550,7 @@ function requireClientH1 () {
 	      return socket.destroyed
 	    },
 	    busy (request) {
-	      if (socket[kWriting] || socket[kReset] || socket[kBlocking]) {
+	      if (socket[kWriting] || socket[kReset] || socket[kBlocking] || socket[kIdleSocketValidation] === 1) {
 	        return true
 	      }
 
@@ -9428,6 +9588,39 @@ function requireClientH1 () {
 	  }
 	}
 
+	function clearIdleSocketValidation (socket) {
+	  if (socket[kIdleSocketValidationTimeout]) {
+	    clearImmediate(socket[kIdleSocketValidationTimeout]);
+	    socket[kIdleSocketValidationTimeout] = null;
+	  }
+
+	  socket[kIdleSocketValidation] = 0;
+	}
+
+	function scheduleIdleSocketValidation (client, socket) {
+	  socket[kIdleSocketValidation] = 1;
+	  // Yield to the check phase (after poll) so unsolicited bytes / FIN / RST
+	  // already pending on this idle keep-alive socket are processed before the
+	  // next request is written (GHSA-35p6-xmwp-9g52).
+	  //
+	  // setTimeout(0) pays Node's ~1ms timer floor on every sequential reuse
+	  // (#5493). setImmediate avoids that, but an *unref'd* Immediate lets poll
+	  // block for ~500ms when the event loop is otherwise idle (#5600 / #5606).
+	  // A ref'd Immediate both keeps the pending request alive and makes poll
+	  // return immediately — the hybrid those issues asked for.
+	  socket[kIdleSocketValidationTimeout] = setImmediate(() => {
+	    socket[kIdleSocketValidationTimeout] = null;
+	    socket[kIdleSocketValidation] = 2;
+
+	    if (client[kSocket] === socket && !socket.destroyed) {
+	      client[kResume]();
+	    }
+	  });
+	}
+
+	/**
+	 * @param {import('./client.js')} client
+	 */
 	function resumeH1 (client) {
 	  const socket = client[kSocket];
 
@@ -9440,6 +9633,32 @@ function requireClientH1 () {
 	    } else if (socket[kNoRef] && socket.ref) {
 	      socket.ref();
 	      socket[kNoRef] = false;
+	    }
+
+	    if (client[kRunning] === 0 && client[kPending] > 0 && socket[kSocketUsed]) {
+	      if (socket[kIdleSocketValidation] === 0) {
+	        scheduleIdleSocketValidation(client, socket);
+	        socket[kParser].readMore();
+	        if (socket.destroyed) {
+	          return
+	        }
+	        return
+	      }
+
+	      if (socket[kIdleSocketValidation] === 1) {
+	        socket[kParser].readMore();
+	        if (socket.destroyed) {
+	          return
+	        }
+	        return
+	      }
+	    }
+
+	    if (client[kRunning] === 0) {
+	      socket[kParser].readMore();
+	      if (socket.destroyed) {
+	        return
+	      }
 	    }
 
 	    if (client[kSize] === 0) {
@@ -9497,8 +9716,16 @@ function requireClientH1 () {
 	    }
 	    body = bodyStream.stream;
 	    contentLength = bodyStream.length;
-	  } else if (util.isBlobLike(body) && request.contentType == null && body.type) {
-	    headers.push('content-type', body.type);
+	  } else if (util.isBlobLike(body) && request.contentType == null) {
+	    const contentType = body.type;
+	    if (contentType) {
+	      const contentTypeValue = `${contentType}`;
+	      if (!util.isValidHeaderValue(contentTypeValue)) {
+	        util.errorRequest(client, request, new InvalidArgumentError('invalid content-type header'));
+	        return false
+	      }
+	      headers.push('content-type', contentTypeValue);
+	    }
 	  }
 
 	  if (body && typeof body.read === 'function') {
@@ -9535,13 +9762,24 @@ function requireClientH1 () {
 	  }
 
 	  const socket = client[kSocket];
+	  clearIdleSocketValidation(socket);
 
-	  const abort = (err) => {
-	    if (request.aborted || request.completed) {
+	  /**
+	   * @param {Error} [error]
+	   */
+	  const abort = (error) => {
+	    if (request.aborted) {
 	      return
 	    }
 
-	    util.errorRequest(client, request, err || new RequestAbortedError());
+	    if (request.completed) {
+	      if (request.upgrade || request.method === 'CONNECT') {
+	        util.destroy(socket, new InformationalError('aborted'));
+	      }
+	      return
+	    }
+
+	    util.errorRequest(client, request, error || new RequestAbortedError());
 
 	    util.destroy(body);
 	    util.destroy(socket, new InformationalError('aborted'));
@@ -9999,6 +10237,7 @@ function requireClientH2 () {
 	hasRequiredClientH2 = 1;
 
 	const assert = require$$0$3;
+	const { errorMonitor } = require$$8;
 	const { pipeline } = require$$0$4;
 	const util = requireUtil$8();
 	const {
@@ -10075,6 +10314,15 @@ function requireClientH2 () {
 	  return result
 	}
 
+	/**
+	 * @param {import('node:http2').IncomingHttpHeaders} headers
+	 * @returns {Buffer[]}
+	 */
+	function parseH2ResponseHeaders (headers) {
+	  const { [HTTP2_HEADER_STATUS]: _statusCode, ...realHeaders } = headers;
+	  return parseH2Headers(realHeaders)
+	}
+
 	async function connectH2 (client, socket) {
 	  client[kSocket] = socket;
 
@@ -10124,8 +10372,6 @@ function requireClientH2 () {
 	  socket[kHTTP2Session] = session;
 
 	  util.addListener(socket, 'error', function (err) {
-	    assert(err.code !== 'ERR_TLS_CERT_ALTNAME_INVALID');
-
 	    this[kError] = err;
 
 	    this[kClient][kOnError](err);
@@ -10199,8 +10445,6 @@ function requireClientH2 () {
 	}
 
 	function onHttp2SessionError (err) {
-	  assert(err.code !== 'ERR_TLS_CERT_ALTNAME_INVALID');
-
 	  this[kSocket][kError] = err;
 	  this[kClient][kOnError](err);
 	}
@@ -10295,22 +10539,32 @@ function requireClientH2 () {
 	  headers[HTTP2_HEADER_AUTHORITY] = host || `${hostname}${port ? `:${port}` : ''}`;
 	  headers[HTTP2_HEADER_METHOD] = method;
 
-	  const abort = (err) => {
-	    if (request.aborted || request.completed) {
+	  /**
+	   * @param {Error} [error]
+	   */
+	  const abort = (error) => {
+	    if (request.aborted) {
 	      return
 	    }
 
-	    err = err || new RequestAbortedError();
+	    if (request.completed) {
+	      if (method === 'CONNECT' && stream != null) {
+	        util.destroy(stream, error || new RequestAbortedError());
+	      }
+	      return
+	    }
 
-	    util.errorRequest(client, request, err);
+	    error = error || new RequestAbortedError();
+
+	    util.errorRequest(client, request, error);
 
 	    if (stream != null) {
-	      util.destroy(stream, err);
+	      util.destroy(stream, error);
 	    }
 
 	    // We do not destroy the socket as we can continue using the session
 	    // the stream get's destroyed and the session remains to create new streams
-	    util.destroy(body, err);
+	    util.destroy(body, error);
 	    client[kQueue][client[kRunningIdx]++] = null;
 	    client[kResume]();
 	  };
@@ -10329,25 +10583,57 @@ function requireClientH2 () {
 
 	  if (method === 'CONNECT') {
 	    session.ref();
-	    // We are already connected, streams are pending, first request
-	    // will create a new stream. We trigger a request to create the stream and wait until
-	    // `ready` event is triggered
 	    // We disabled endStream to allow the user to write to the stream
 	    stream = session.request(headers, { endStream: false, signal });
+	    let upgradeResponseFinished = false;
 
-	    if (stream.id && !stream.pending) {
-	      request.onUpgrade(null, null, stream);
-	      ++session[kOpenStreams];
-	      client[kQueue][client[kRunningIdx]++] = null;
-	    } else {
-	      stream.once('ready', () => {
+	    /**
+	     * @param {import('node:http2').IncomingHttpHeaders} headers
+	     */
+	    const onResponse = (headers) => {
+	      upgradeResponseFinished = true;
+	      stream.off(errorMonitor, onUpgradeError);
+	      request.onUpgradeResponse(Number(headers[HTTP2_HEADER_STATUS]), headers, parseH2ResponseHeaders);
+	    };
+
+	    /**
+	     * @param {Error} error
+	     */
+	    const onUpgradeError = (error) => {
+	      upgradeResponseFinished = true;
+	      stream.off('response', onResponse);
+	      request.onUpgradeError(error);
+	    };
+
+	    const onReady = () => {
+	      try {
 	        request.onUpgrade(null, null, stream);
-	        ++session[kOpenStreams];
-	        client[kQueue][client[kRunningIdx]++] = null;
-	      });
-	    }
+	      } catch (error) {
+	        stream.off('response', onResponse);
+	        abort(error);
+	        return
+	      }
+
+	      if (request.aborted) {
+	        return
+	      }
+
+	      stream.off('error', abort);
+	      stream.once(errorMonitor, onUpgradeError);
+	      client[kQueue][client[kRunningIdx]++] = null;
+	    };
+
+	    stream.once('response', onResponse);
+	    stream.once('error', abort);
+	    ++session[kOpenStreams];
+	    onReady();
 
 	    stream.once('close', () => {
+	      if (!upgradeResponseFinished && request.completed) {
+	        stream.off('response', onResponse);
+	        stream.off(errorMonitor, onUpgradeError);
+	        request.onUpgradeError(new InformationalError(`HTTP/2: "stream error" received - code ${stream.rstCode}`));
+	      }
 	      session[kOpenStreams] -= 1;
 	      if (session[kOpenStreams] === 0) session.unref();
 	    });
@@ -11105,9 +11391,11 @@ function requireClient () {
 	    autoSelectFamilyAttemptTimeout,
 	    // h2
 	    maxConcurrentStreams,
-	    allowH2
+	    allowH2,
+	    webSocket,
+	    eventSource
 	  } = {}) {
-	    super();
+	    super({ webSocket, eventSource });
 
 	    if (keepAlive !== undefined) {
 	      throw new InvalidArgumentError('unsupported keepAlive, use pipelining=0 instead')
@@ -11814,8 +12102,8 @@ function requirePoolBase () {
 	const kStats = Symbol('stats');
 
 	class PoolBase extends DispatcherBase {
-	  constructor () {
-	    super();
+	  constructor (opts) {
+	    super(opts);
 
 	    this[kQueue] = new FixedQueue();
 	    this[kClients] = [];
@@ -12034,8 +12322,6 @@ function requirePool () {
 	    allowH2,
 	    ...options
 	  } = {}) {
-	    super();
-
 	    if (connections != null && (!Number.isFinite(connections) || connections < 0)) {
 	      throw new InvalidArgumentError('invalid connections')
 	    }
@@ -12059,6 +12345,8 @@ function requirePool () {
 	        ...connect
 	      });
 	    }
+
+	    super(options);
 
 	    this[kInterceptors] = options.interceptors?.Pool && Array.isArray(options.interceptors.Pool)
 	      ? options.interceptors.Pool
@@ -12352,9 +12640,7 @@ function requireAgent$1 () {
 	}
 
 	class Agent extends DispatcherBase {
-	  constructor ({ factory = defaultFactory, maxRedirections = 0, connect, ...options } = {}) {
-	    super();
-
+	  constructor ({ factory = defaultFactory, maxRedirections = 0, connect, tls, ...options } = {}) {
 	    if (typeof factory !== 'function') {
 	      throw new InvalidArgumentError('factory must be a function.')
 	    }
@@ -12367,15 +12653,21 @@ function requireAgent$1 () {
 	      throw new InvalidArgumentError('maxRedirections must be a positive number')
 	    }
 
+	    super(options);
+
 	    if (connect && typeof connect !== 'function') {
 	      connect = { ...connect };
+	    }
+
+	    if (tls && typeof tls !== 'function') {
+	      tls = { ...tls };
 	    }
 
 	    this[kInterceptors] = options.interceptors?.Agent && Array.isArray(options.interceptors.Agent)
 	      ? options.interceptors.Agent
 	      : [createRedirectInterceptor({ maxRedirections })];
 
-	    this[kOptions] = { ...util.deepClone(options), connect };
+	    this[kOptions] = { ...util.deepClone(options), connect, tls };
 	    this[kOptions].interceptors = options.interceptors
 	      ? { ...options.interceptors }
 	      : undefined;
@@ -12931,6 +13223,28 @@ function requireRetryHandler () {
 	  return new Date(retryAfter).getTime() - current
 	}
 
+	function validatePartialResponseContentLength (headers, range, statusCode, retryCount) {
+	  const contentLength = headers['content-length'];
+	  if (contentLength == null) {
+	    return null
+	  }
+
+	  if (!Number.isFinite(range.start) || !Number.isFinite(range.end)) {
+	    return null
+	  }
+
+	  const length = Number(contentLength);
+	  const expectedLength = range.end - range.start + 1;
+	  if (!Number.isFinite(length) || length !== expectedLength) {
+	    return new RequestRetryError('Content-Length mismatch', statusCode, {
+	      headers,
+	      data: { count: retryCount }
+	    })
+	  }
+
+	  return null
+	}
+
 	class RetryHandler {
 	  constructor (opts, handlers) {
 	    const { retryOptions, ...dispatchOpts } = opts;
@@ -12984,6 +13298,7 @@ function requireRetryHandler () {
 	    this.end = null;
 	    this.etag = null;
 	    this.resume = null;
+	    this.headersSent = false;
 
 	    // Handle possible onConnect duplication
 	    this.handler.onConnect(reason => {
@@ -12994,6 +13309,20 @@ function requireRetryHandler () {
 	        this.reason = reason;
 	      }
 	    });
+	  }
+
+	  checkpointResponseEnd (headers, resume) {
+	    if (this.end == null && this.opts.method !== 'HEAD') {
+	      const contentLength = headers['content-length'];
+	      this.end = contentLength != null ? Number(contentLength) - 1 : null;
+
+	      assert(
+	        this.end == null || Number.isFinite(this.end),
+	        'invalid content-length'
+	      );
+	    }
+
+	    this.resume = this.end != null ? resume : null;
 	  }
 
 	  onRequestSent () {
@@ -13084,7 +13413,12 @@ function requireRetryHandler () {
 	    this.retryCount += 1;
 
 	    if (statusCode >= 300) {
-	      if (this.retryOpts.statusCodes.includes(statusCode) === false) {
+	      // Only expose a response if no earlier attempt has reached the caller.
+	      // Otherwise abort this attempt so the error settles the existing body
+	      // instead of replacing it with a new response.
+	      if (!this.headersSent && this.retryOpts.statusCodes.includes(statusCode) === false) {
+	        this.headersSent = true;
+	        this.checkpointResponseEnd(headers, resume);
 	        return this.handler.onHeaders(
 	          statusCode,
 	          rawHeaders,
@@ -13145,10 +13479,23 @@ function requireRetryHandler () {
 	        return false
 	      }
 
+	      const contentLengthError = validatePartialResponseContentLength(headers, contentRange, statusCode, this.retryCount);
+	      if (contentLengthError != null) {
+	        this.abort(contentLengthError);
+	        return false
+	      }
+
 	      const { start, size, end = size - 1 } = contentRange;
 
-	      assert(this.start === start, 'content-range mismatch');
-	      assert(this.end == null || this.end === end, 'content-range mismatch');
+	      if (this.start !== start || (this.end != null && this.end !== end)) {
+	        this.abort(
+	          new RequestRetryError('Content-Range mismatch', statusCode, {
+	            headers,
+	            data: { count: this.retryCount }
+	          })
+	        );
+	        return false
+	      }
 
 	      this.resume = resume;
 	      return true
@@ -13160,12 +13507,19 @@ function requireRetryHandler () {
 	        const range = parseRangeHeader(headers['content-range']);
 
 	        if (range == null) {
+	          this.headersSent = true;
 	          return this.handler.onHeaders(
 	            statusCode,
 	            rawHeaders,
 	            resume,
 	            statusMessage
 	          )
+	        }
+
+	        const contentLengthError = validatePartialResponseContentLength(headers, range, statusCode, this.retryCount);
+	        if (contentLengthError != null) {
+	          this.abort(contentLengthError);
+	          return false
 	        }
 
 	        const { start, size, end = size - 1 } = range;
@@ -13192,6 +13546,7 @@ function requireRetryHandler () {
 	      );
 
 	      this.resume = resume;
+	      this.headersSent = true;
 	      this.etag = headers.etag != null ? headers.etag : null;
 
 	      // Weak etags are not useful for comparison nor cache
@@ -13231,7 +13586,7 @@ function requireRetryHandler () {
 	  }
 
 	  onError (err) {
-	    if (this.aborted || isDisturbed(this.opts.body)) {
+	    if (this.aborted || isDisturbed(this.opts.body) || (this.headersSent && this.resume == null)) {
 	      return this.handler.onError(err)
 	    }
 
@@ -20855,8 +21210,10 @@ function requireFetch () {
 	  // 19. Run these steps in parallel:
 
 	  //    1. Run these steps, but abort when fetchParams is canceled:
-	  fetchParams.controller.onAborted = onAborted;
-	  fetchParams.controller.on('terminated', onAborted);
+	  if (!fetchParams.controller.resume) {
+	    fetchParams.controller.on('terminated', onAborted);
+	  }
+
 	  fetchParams.controller.resume = async () => {
 	    // 1. While true
 	    while (true) {
@@ -21025,8 +21382,6 @@ function requireFetch () {
 	          }
 	          location = headersList.get('location', true);
 
-	          this.body = new Readable({ read: resume });
-
 	          const decoders = [];
 
 	          const willFollow = location && request.redirect === 'follow' &&
@@ -21044,7 +21399,7 @@ function requireFetch () {
 	            // CVE fix similar to urllib3 (GHSA-gm62-xv2j-4w53) and curl (CVE-2022-32206).
 	            const maxContentEncodings = 5;
 	            if (codings.length > maxContentEncodings) {
-	              reject(new Error(`too many content-encodings in response: ${codings.length}, maximum allowed is ${maxContentEncodings}`));
+	              this.abort(new Error(`too many content-encodings in response: ${codings.length}, maximum allowed is ${maxContentEncodings}`));
 	              return true
 	            }
 
@@ -21076,6 +21431,8 @@ function requireFetch () {
 	              }
 	            }
 	          }
+
+	          this.body = new Readable({ read: resume });
 
 	          const onError = this.onError.bind(this);
 
@@ -21121,10 +21478,6 @@ function requireFetch () {
 	        onComplete () {
 	          if (this.abort) {
 	            fetchParams.controller.off('terminated', this.abort);
-	          }
-
-	          if (fetchParams.controller.onAborted) {
-	            fetchParams.controller.off('terminated', fetchParams.controller.onAborted);
 	          }
 
 	          fetchParams.controller.ended = true;
@@ -23556,7 +23909,7 @@ function requireUtil$3 () {
 
 	    if (
 	      code < 0x20 || // exclude CTLs (0-31)
-	      code === 0x7F || // DEL
+	      code > 0x7E || // exclude DEL and non-ascii
 	      code === 0x3B // ;
 	    ) {
 	      throw new Error('Invalid cookie path')
@@ -23565,16 +23918,80 @@ function requireUtil$3 () {
 	}
 
 	/**
-	 * I have no idea why these values aren't allowed to be honest,
-	 * but Deno tests these. - Khafra
+	 * <let-dig> ::= <letter> | <digit>
+	 *
+	 * <letter> ::= any one of the 52 alphabetic characters A through Z in
+	 * upper case and a through z in lower case
+	 *
+	 * <digit> ::= any one of the ten digits 0 through 9r
+	 *
+	 * @see https://www.rfc-editor.org/rfc/rfc1034#section-3.5
+	 * @param {number} code
+	 */
+	function isLetterOrDigit (code) {
+	  return (
+	    (code >= 0x30 && code <= 0x39) || // 0-9
+	    (code >= 0x41 && code <= 0x5A) || // A-Z
+	    (code >= 0x61 && code <= 0x7A) // a-z
+	  )
+	}
+
+	/**
+	 * Validates a cookie domain against the "preferred name syntax".
+	 *
+	 * <domain>      ::= <subdomain> | " "
+	 * <subdomain>   ::= <label> | <subdomain> "." <label>
+	 * <label>       ::= <let-dig> [ [ <ldh-str> ] <let-dig> ]
+	 * <ldh-str>     ::= <let-dig-hyp> | <let-dig-hyp> <ldh-str>
+	 * <let-dig-hyp> ::= <let-dig> | "-"
+	 *
+	 * @see https://www.rfc-editor.org/rfc/rfc1034#section-3.5
+	 * @see https://www.rfc-editor.org/rfc/rfc1123#section-2.1
+	 * @see https://www.rfc-editor.org/rfc/rfc1035#section-2.3.4
 	 * @param {string} domain
 	 */
 	function validateCookieDomain (domain) {
-	  if (
-	    domain.startsWith('-') ||
-	    domain.endsWith('.') ||
-	    domain.endsWith('-')
-	  ) {
+	  // <domain> ::= <subdomain> | " "
+	  if (domain === ' ') {
+	    return
+	  }
+
+	  if (domain.length > 255) {
+	    throw new Error('Invalid cookie domain')
+	  }
+
+	  let labelLength = 0;
+
+	  for (let i = 0; i < domain.length; ++i) {
+	    const code = domain.charCodeAt(i);
+
+	    if (code === 0x2E) {
+	      if (labelLength === 0) {
+	        throw new Error('Invalid cookie domain')
+	      }
+
+	      if (domain.charCodeAt(i - 1) === 0x2D) { // "-"
+	        throw new Error('Invalid cookie domain')
+	      }
+
+	      labelLength = 0;
+	      continue
+	    }
+
+	    if (labelLength === 0 && !isLetterOrDigit(code)) {
+	      throw new Error('Invalid cookie domain')
+	    }
+
+	    if (!isLetterOrDigit(code) && code !== 0x2D) { // "-"
+	      throw new Error('Invalid cookie domain')
+	    }
+
+	    if (++labelLength > 63) {
+	      throw new Error('Invalid cookie domain')
+	    }
+	  }
+
+	  if (labelLength === 0 || domain.charCodeAt(domain.length - 1) === 0x2D) { // "-"
 	    throw new Error('Invalid cookie domain')
 	  }
 	}
@@ -23717,7 +24134,13 @@ function requireUtil$3 () {
 
 	    const [key, ...value] = part.split('=');
 
-	    out.push(`${key.trim()}=${value.join('=')}`);
+	    const trimmedKey = key.trim();
+	    const joinedValue = value.join('=');
+
+	    validateCookieName(trimmedKey);
+	    validateCookieValue(joinedValue);
+
+	    out.push(`${trimmedKey}=${joinedValue}`);
 	  }
 
 	  return out.join('; ')
@@ -23734,11 +24157,11 @@ function requireUtil$3 () {
 	return util$3;
 }
 
-var parse$2;
+var parse$3;
 var hasRequiredParse$2;
 
 function requireParse$2 () {
-	if (hasRequiredParse$2) return parse$2;
+	if (hasRequiredParse$2) return parse$3;
 	hasRequiredParse$2 = 1;
 
 	const { maxNameValuePairSize, maxAttributeValueSize } = requireConstants$2();
@@ -24016,32 +24439,25 @@ function requireParse$2 () {
 	    // If the attribute-name case-insensitively matches the string
 	    // "SameSite", the user agent MUST process the cookie-av as follows:
 
-	    // 1. Let enforcement be "Default".
-	    let enforcement = 'Default';
-
 	    const attributeValueLowercase = attributeValue.toLowerCase();
-	    // 2. If cookie-av's attribute-value is a case-insensitive match for
-	    //    "None", set enforcement to "None".
-	    if (attributeValueLowercase.includes('none')) {
-	      enforcement = 'None';
-	    }
 
-	    // 3. If cookie-av's attribute-value is a case-insensitive match for
-	    //    "Strict", set enforcement to "Strict".
-	    if (attributeValueLowercase.includes('strict')) {
-	      enforcement = 'Strict';
+	    // 1. If cookie-av's attribute-value is a case-insensitive match for
+	    //    "None", append an attribute to the cookie-attribute-list with an
+	    //    attribute-name of "SameSite" and an attribute-value of "None".
+	    if (attributeValueLowercase === 'none') {
+	      cookieAttributeList.sameSite = 'None';
+	    } else if (attributeValueLowercase === 'strict') {
+	      // 2. If cookie-av's attribute-value is a case-insensitive match for
+	      //    "Strict", append an attribute to the cookie-attribute-list with
+	      //    an attribute-name of "SameSite" and an attribute-value of
+	      //    "Strict".
+	      cookieAttributeList.sameSite = 'Strict';
+	    } else if (attributeValueLowercase === 'lax') {
+	      // 3. If cookie-av's attribute-value is a case-insensitive match for
+	      //    "Lax", append an attribute to the cookie-attribute-list with an
+	      //    attribute-name of "SameSite" and an attribute-value of "Lax".
+	      cookieAttributeList.sameSite = 'Lax';
 	    }
-
-	    // 4. If cookie-av's attribute-value is a case-insensitive match for
-	    //    "Lax", set enforcement to "Lax".
-	    if (attributeValueLowercase.includes('lax')) {
-	      enforcement = 'Lax';
-	    }
-
-	    // 5. Append an attribute to the cookie-attribute-list with an
-	    //    attribute-name of "SameSite" and an attribute-value of
-	    //    enforcement.
-	    cookieAttributeList.sameSite = enforcement;
 	  } else {
 	    cookieAttributeList.unparsed ??= [];
 
@@ -24052,11 +24468,11 @@ function requireParse$2 () {
 	  return parseUnparsedAttributes(unparsedAttributes, cookieAttributeList)
 	}
 
-	parse$2 = {
+	parse$3 = {
 	  parseSetCookie,
 	  parseUnparsedAttributes
 	};
-	return parse$2;
+	return parse$3;
 }
 
 var cookies;
@@ -25315,7 +25731,7 @@ function requireConnection () {
 	        // is specified, the server needs to include the same field and one of
 	        // the selected subprotocol values in its response for the connection to
 	        // be established.
-	        if (!requestProtocols.includes(secProtocol)) {
+	        if (requestProtocols === null || !requestProtocols.includes(secProtocol)) {
 	          failWebsocketConnection(ws, 'Protocol was not set in the opening handshake.');
 	          return
 	        }
@@ -25507,40 +25923,35 @@ function requirePermessageDeflate () {
 	const kBuffer = Symbol('kBuffer');
 	const kLength = Symbol('kLength');
 
-	// Default maximum decompressed message size: 4 MB
-	const kDefaultMaxDecompressedSize = 4 * 1024 * 1024;
-
 	class PerMessageDeflate {
 	  /** @type {import('node:zlib').InflateRaw} */
 	  #inflate
 
 	  #options = {}
 
-	  /** @type {boolean} */
-	  #aborted = false
-
-	  /** @type {Function|null} */
-	  #currentCallback = null
+	  #maxPayloadSize = 0
 
 	  /**
 	   * @param {Map<string, string>} extensions
 	   */
-	  constructor (extensions) {
+	  constructor (extensions, options) {
 	    this.#options.serverNoContextTakeover = extensions.has('server_no_context_takeover');
 	    this.#options.serverMaxWindowBits = extensions.get('server_max_window_bits');
+
+	    this.#maxPayloadSize = options.maxPayloadSize;
 	  }
 
+	  /**
+	   * Decompress a compressed payload.
+	   * @param {Buffer} chunk Compressed data
+	   * @param {boolean} fin Final fragment flag
+	   * @param {Function} callback Callback function
+	   */
 	  decompress (chunk, fin, callback) {
 	    // An endpoint uses the following algorithm to decompress a message.
 	    // 1.  Append 4 octets of 0x00 0x00 0xff 0xff to the tail end of the
 	    //     payload of the message.
 	    // 2.  Decompress the resulting data using DEFLATE.
-
-	    if (this.#aborted) {
-	      callback(new MessageSizeExceededError());
-	      return
-	    }
-
 	    if (!this.#inflate) {
 	      let windowBits = Z_DEFAULT_WINDOWBITS;
 
@@ -25563,23 +25974,17 @@ function requirePermessageDeflate () {
 	      this.#inflate[kLength] = 0;
 
 	      this.#inflate.on('data', (data) => {
-	        if (this.#aborted) {
-	          return
-	        }
-
 	        this.#inflate[kLength] += data.length;
 
-	        if (this.#inflate[kLength] > kDefaultMaxDecompressedSize) {
-	          this.#aborted = true;
+	        if (this.#maxPayloadSize > 0 && this.#inflate[kLength] > this.#maxPayloadSize) {
+	          callback(new MessageSizeExceededError());
+	          // The inflater may still hold buffered input that can emit a late
+	          // zlib error. Remove the data listener, then deterministically stop
+	          // the stream so a subsequent 'error' cannot fire without a listener
+	          // (which would terminate the process as an unhandled error event).
 	          this.#inflate.removeAllListeners();
 	          this.#inflate.destroy();
 	          this.#inflate = null;
-
-	          if (this.#currentCallback) {
-	            const cb = this.#currentCallback;
-	            this.#currentCallback = null;
-	            cb(new MessageSizeExceededError());
-	          }
 	          return
 	        }
 
@@ -25592,14 +25997,13 @@ function requirePermessageDeflate () {
 	      });
 	    }
 
-	    this.#currentCallback = callback;
 	    this.#inflate.write(chunk);
 	    if (fin) {
 	      this.#inflate.write(tail);
 	    }
 
 	    this.#inflate.flush(() => {
-	      if (this.#aborted || !this.#inflate) {
+	      if (!this.#inflate) {
 	        return
 	      }
 
@@ -25607,7 +26011,6 @@ function requirePermessageDeflate () {
 
 	      this.#inflate[kBuffer].length = 0;
 	      this.#inflate[kLength] = 0;
-	      this.#currentCallback = null;
 
 	      callback(null, full);
 	    });
@@ -25643,6 +26046,12 @@ function requireReceiver () {
 	const { WebsocketFrameSend } = requireFrame();
 	const { closeWebSocketConnection } = requireConnection();
 	const { PerMessageDeflate } = requirePermessageDeflate();
+	const { MessageSizeExceededError } = requireErrors$1();
+
+	function failWebsocketConnectionWithCode (ws, code, reason) {
+	  closeWebSocketConnection(ws, code, reason, Buffer.byteLength(reason));
+	  failWebsocketConnection(ws, reason);
+	}
 
 	// This code was influenced by ws released under the MIT license.
 	// Copyright (c) 2011 Einar Otto Stangvik <einaros@gmail.com>
@@ -25651,6 +26060,7 @@ function requireReceiver () {
 
 	class ByteParser extends Writable {
 	  #buffers = []
+	  #fragmentsBytes = 0
 	  #byteOffset = 0
 	  #loop = false
 
@@ -25662,18 +26072,27 @@ function requireReceiver () {
 	  /** @type {Map<string, PerMessageDeflate>} */
 	  #extensions
 
+	  /** @type {number} */
+	  #maxFragments
+
+	  /** @type {number} */
+	  #maxPayloadSize
+
 	  /**
 	   * @param {import('./websocket').WebSocket} ws
 	   * @param {Map<string, string>|null} extensions
+	   * @param {{ maxFragments?: number, maxPayloadSize?: number }} [options]
 	   */
-	  constructor (ws, extensions) {
+	  constructor (ws, extensions, options = {}) {
 	    super();
 
 	    this.ws = ws;
 	    this.#extensions = extensions == null ? new Map() : extensions;
+	    this.#maxFragments = options.maxFragments ?? 0;
+	    this.#maxPayloadSize = options.maxPayloadSize ?? 0;
 
 	    if (this.#extensions.has('permessage-deflate')) {
-	      this.#extensions.set('permessage-deflate', new PerMessageDeflate(extensions));
+	      this.#extensions.set('permessage-deflate', new PerMessageDeflate(extensions, options));
 	    }
 	  }
 
@@ -25687,6 +26106,19 @@ function requireReceiver () {
 	    this.#loop = true;
 
 	    this.run(callback);
+	  }
+
+	  #validatePayloadLength () {
+	    if (
+	      this.#maxPayloadSize > 0 &&
+	      !isControlFrame(this.#info.opcode) &&
+	      this.#info.payloadLength + this.#fragmentsBytes > this.#maxPayloadSize
+	    ) {
+	      failWebsocketConnectionWithCode(this.ws, 1009, 'Payload size exceeds maximum allowed size');
+	      return false
+	    }
+
+	    return true
 	  }
 
 	  /**
@@ -25777,6 +26209,10 @@ function requireReceiver () {
 	        if (payloadLength <= 125) {
 	          this.#info.payloadLength = payloadLength;
 	          this.#state = parserStates.READ_DATA;
+
+	          if (!this.#validatePayloadLength()) {
+	            return
+	          }
 	        } else if (payloadLength === 126) {
 	          this.#state = parserStates.PAYLOADLENGTH_16;
 	        } else if (payloadLength === 127) {
@@ -25801,6 +26237,10 @@ function requireReceiver () {
 
 	        this.#info.payloadLength = buffer.readUInt16BE(0);
 	        this.#state = parserStates.READ_DATA;
+
+	        if (!this.#validatePayloadLength()) {
+	          return
+	        }
 	      } else if (this.#state === parserStates.PAYLOADLENGTH_64) {
 	        if (this.#byteOffset < 8) {
 	          return callback()
@@ -25823,6 +26263,10 @@ function requireReceiver () {
 
 	        this.#info.payloadLength = lower;
 	        this.#state = parserStates.READ_DATA;
+
+	        if (!this.#validatePayloadLength()) {
+	          return
+	        }
 	      } else if (this.#state === parserStates.READ_DATA) {
 	        if (this.#byteOffset < this.#info.payloadLength) {
 	          return callback()
@@ -25833,44 +26277,74 @@ function requireReceiver () {
 	        if (isControlFrame(this.#info.opcode)) {
 	          this.#loop = this.parseControlFrame(body);
 	          this.#state = parserStates.INFO;
+
+	          // If the automatic PONG/CLOSE reply filled the socket's write buffer,
+	          // stop parsing and resume on drain so a PING flood cannot grow the
+	          // outbound queue without bound.
+	          const socket = this.ws[kResponse].socket;
+	          if (this.#loop && socket.writableNeedDrain) {
+	            this.#loop = false;
+	            socket.once('drain', () => {
+	              if (this.destroyed) return
+	              this.#loop = true;
+	              this.run(callback);
+	            });
+	            return
+	          }
 	        } else {
 	          if (!this.#info.compressed) {
-	            this.#fragments.push(body);
+	            if (!this.writeFragments(body)) {
+	              return
+	            }
+
+	            if (this.#maxPayloadSize > 0 && this.#fragmentsBytes > this.#maxPayloadSize) {
+	              failWebsocketConnectionWithCode(this.ws, 1009, new MessageSizeExceededError().message);
+	              return
+	            }
 
 	            // If the frame is not fragmented, a message has been received.
 	            // If the frame is fragmented, it will terminate with a fin bit set
 	            // and an opcode of 0 (continuation), therefore we handle that when
 	            // parsing continuation frames, not here.
 	            if (!this.#info.fragmented && this.#info.fin) {
-	              const fullMessage = Buffer.concat(this.#fragments);
-	              websocketMessageReceived(this.ws, this.#info.binaryType, fullMessage);
-	              this.#fragments.length = 0;
+	              websocketMessageReceived(this.ws, this.#info.binaryType, this.consumeFragments());
 	            }
 
 	            this.#state = parserStates.INFO;
 	          } else {
-	            this.#extensions.get('permessage-deflate').decompress(body, this.#info.fin, (error, data) => {
-	              if (error) {
-	                failWebsocketConnection(this.ws, error.message);
-	                return
-	              }
+	            this.#extensions.get('permessage-deflate').decompress(
+	              body,
+	              this.#info.fin,
+	              (error, data) => {
+	                if (error) {
+	                  const code = error instanceof MessageSizeExceededError ? 1009 : 1007;
+	                  failWebsocketConnectionWithCode(this.ws, code, error.message);
+	                  return
+	                }
 
-	              this.#fragments.push(data);
+	                if (!this.writeFragments(data)) {
+	                  return
+	                }
 
-	              if (!this.#info.fin) {
-	                this.#state = parserStates.INFO;
+	                if (this.#maxPayloadSize > 0 && this.#fragmentsBytes > this.#maxPayloadSize) {
+	                  failWebsocketConnectionWithCode(this.ws, 1009, new MessageSizeExceededError().message);
+	                  return
+	                }
+
+	                if (!this.#info.fin) {
+	                  this.#state = parserStates.INFO;
+	                  this.#loop = true;
+	                  this.run(callback);
+	                  return
+	                }
+
+	                websocketMessageReceived(this.ws, this.#info.binaryType, this.consumeFragments());
+
 	                this.#loop = true;
+	                this.#state = parserStates.INFO;
 	                this.run(callback);
-	                return
 	              }
-
-	              websocketMessageReceived(this.ws, this.#info.binaryType, Buffer.concat(this.#fragments));
-
-	              this.#loop = true;
-	              this.#state = parserStates.INFO;
-	              this.#fragments.length = 0;
-	              this.run(callback);
-	            });
+	            );
 
 	            this.#loop = false;
 	            break
@@ -25920,6 +26394,35 @@ function requireReceiver () {
 	    this.#byteOffset -= n;
 
 	    return buffer
+	  }
+
+	  writeFragments (fragment) {
+	    if (
+	      this.#maxFragments > 0 &&
+	      this.#fragments.length === this.#maxFragments
+	    ) {
+	      failWebsocketConnectionWithCode(this.ws, 1008, 'Too many message fragments');
+	      return false
+	    }
+
+	    this.#fragmentsBytes += fragment.length;
+	    this.#fragments.push(fragment);
+	    return true
+	  }
+
+	  consumeFragments () {
+	    const fragments = this.#fragments;
+
+	    if (fragments.length === 1) {
+	      this.#fragmentsBytes = 0;
+	      return fragments.shift()
+	    }
+
+	    const output = Buffer.concat(fragments, this.#fragmentsBytes);
+	    this.#fragments = [];
+	    this.#fragmentsBytes = 0;
+
+	    return output
 	  }
 
 	  parseCloseBody (data) {
@@ -26607,7 +27110,14 @@ function requireWebsocket () {
 	    // once this happens, the connection is open
 	    this[kResponse] = response;
 
-	    const parser = new ByteParser(this, parsedExtensions);
+	    const webSocketOptions = this[kController]?.dispatcher?.webSocketOptions;
+	    const maxFragments = webSocketOptions?.maxFragments;
+	    const maxPayloadSize = webSocketOptions?.maxPayloadSize;
+
+	    const parser = new ByteParser(this, parsedExtensions, {
+	      maxFragments,
+	      maxPayloadSize
+	    });
 	    parser.on('drain', onParserDrain);
 	    parser.on('error', onParserError.bind(this));
 
@@ -26812,6 +27322,7 @@ var hasRequiredEventsourceStream;
 function requireEventsourceStream () {
 	if (hasRequiredEventsourceStream) return eventsourceStream;
 	hasRequiredEventsourceStream = 1;
+	const buffer = require$$0$2;
 	const { Transform } = require$$0$4;
 	const { isASCIINumber, isValidLastEventId } = requireUtil$1();
 
@@ -26835,6 +27346,63 @@ function requireEventsourceStream () {
 	 * @type {32} SPACE
 	 */
 	const SPACE = 0x20;
+
+	const defaultMaxEventSize = buffer.kStringMaxLength;
+
+	const DATA = Buffer.from('data');
+	const EVENT = Buffer.from('event');
+	const ID = Buffer.from('id');
+	const RETRY = Buffer.from('retry');
+
+	// Each data field creates a string node, and each unconsumed input chunk keeps
+	// a Buffer wrapper. The absolute ceiling protects the large default byte limit.
+	const minParserItems = 1024;
+	const maxParserItems = 131072;
+	const bytesPerParserItem = 128;
+
+	function isASCIINumberBytes (buffer, start) {
+	  if (start >= buffer.length) {
+	    return false
+	  }
+
+	  for (let i = start; i < buffer.length; i++) {
+	    if (buffer[i] < 0x30 || buffer[i] > 0x39) {
+	      return false
+	    }
+	  }
+
+	  return true
+	}
+
+	function isValidLastEventIdBytes (buffer, start) {
+	  for (let i = start; i < buffer.length; i++) {
+	    if (buffer[i] === 0x00) {
+	      return false
+	    }
+	  }
+
+	  return true
+	}
+
+	function isFieldName (line, length, field) {
+	  if (length !== field.length) {
+	    return false
+	  }
+
+	  for (let i = 0; i < length; i++) {
+	    if (line[i] !== field[i]) {
+	      return false
+	    }
+	  }
+
+	  return true
+	}
+
+	function createMaxEventSizeExceededError () {
+	  const error = new Error('EventSource message size exceeded');
+	  error.aborted = false;
+	  return error
+	}
 
 	/**
 	 * @typedef {object} EventSourceStreamEvent
@@ -26876,11 +27444,21 @@ function requireEventsourceStream () {
 	  eventEndCheck = false
 
 	  /**
-	   * @type {Buffer}
+	   * @type {Buffer[]}
 	   */
-	  buffer = null
+	  chunks = []
 
+	  chunkIndex = 0
 	  pos = 0
+	  lineChunkIndex = 0
+	  linePos = 0
+	  lineLength = 0
+	  eventSize = 0
+	  eventFieldSizes = { data: 0, event: 0, id: 0, retry: 0 }
+	  dataLineCount = 0
+	  maxEventSize
+	  maxDataLines
+	  maxBufferedChunks
 
 	  event = {
 	    data: undefined,
@@ -26891,6 +27469,7 @@ function requireEventsourceStream () {
 
 	  /**
 	   * @param {object} options
+	   * @param {number} [options.maxEventSize]
 	   * @param {eventSourceSettings} options.eventSourceSettings
 	   * @param {Function} [options.push]
 	   */
@@ -26902,6 +27481,12 @@ function requireEventsourceStream () {
 	    super(options);
 
 	    this.state = options.eventSourceSettings || {};
+	    this.maxEventSize = options.maxEventSize ?? defaultMaxEventSize;
+	    const parserItemLimit = this.maxEventSize > 0
+	      ? Math.min(maxParserItems, Math.max(minParserItems, Math.floor(this.maxEventSize / bytesPerParserItem)))
+	      : 0;
+	    this.maxDataLines = parserItemLimit;
+	    this.maxBufferedChunks = parserItemLimit;
 	    if (options.push) {
 	      this.push = options.push;
 	    }
@@ -26919,92 +27504,28 @@ function requireEventsourceStream () {
 	      return
 	    }
 
-	    // Cache the chunk in the buffer, as the data might not be complete while
-	    // processing it
-	    // TODO: Investigate if there is a more performant way to handle
-	    // incoming chunks
-	    // see: https://github.com/nodejs/undici/issues/2630
-	    if (this.buffer) {
-	      this.buffer = Buffer.concat([this.buffer, chunk]);
-	    } else {
-	      this.buffer = chunk;
+	    // A leading line ending can immediately release the currently buffered
+	    // line, even when it uses the final allowed chunk slot.
+	    if (this.maxEventSize > 0 &&
+	        this.chunks.length >= this.maxBufferedChunks &&
+	        chunk[0] !== LF && chunk[0] !== CR) {
+	      callback(createMaxEventSizeExceededError());
+	      return
 	    }
+	    this.chunks.push(chunk);
 
 	    // Strip leading byte-order-mark if we opened the stream and started
 	    // the processing of the incoming data
 	    if (this.checkBOM) {
-	      switch (this.buffer.length) {
-	        case 1:
-	          // Check if the first byte is the same as the first byte of the BOM
-	          if (this.buffer[0] === BOM[0]) {
-	            // If it is, we need to wait for more data
-	            callback();
-	            return
-	          }
-	          // Set the checkBOM flag to false as we don't need to check for the
-	          // BOM anymore
-	          this.checkBOM = false;
-
-	          // The buffer only contains one byte so we need to wait for more data
-	          callback();
-	          return
-	        case 2:
-	          // Check if the first two bytes are the same as the first two bytes
-	          // of the BOM
-	          if (
-	            this.buffer[0] === BOM[0] &&
-	            this.buffer[1] === BOM[1]
-	          ) {
-	            // If it is, we need to wait for more data, because the third byte
-	            // is needed to determine if it is the BOM or not
-	            callback();
-	            return
-	          }
-
-	          // Set the checkBOM flag to false as we don't need to check for the
-	          // BOM anymore
-	          this.checkBOM = false;
-	          break
-	        case 3:
-	          // Check if the first three bytes are the same as the first three
-	          // bytes of the BOM
-	          if (
-	            this.buffer[0] === BOM[0] &&
-	            this.buffer[1] === BOM[1] &&
-	            this.buffer[2] === BOM[2]
-	          ) {
-	            // If it is, we can drop the buffered data, as it is only the BOM
-	            this.buffer = Buffer.alloc(0);
-	            // Set the checkBOM flag to false as we don't need to check for the
-	            // BOM anymore
-	            this.checkBOM = false;
-
-	            // Await more data
-	            callback();
-	            return
-	          }
-	          // If it is not the BOM, we can start processing the data
-	          this.checkBOM = false;
-	          break
-	        default:
-	          // The buffer is longer than 3 bytes, so we can drop the BOM if it is
-	          // present
-	          if (
-	            this.buffer[0] === BOM[0] &&
-	            this.buffer[1] === BOM[1] &&
-	            this.buffer[2] === BOM[2]
-	          ) {
-	            // Remove the BOM from the buffer
-	            this.buffer = this.buffer.subarray(3);
-	          }
-
-	          // Set the checkBOM flag to false as we don't need to check for the
-	          this.checkBOM = false;
-	          break
+	      if (this.handleBOM()) {
+	        callback();
+	        return
 	      }
 	    }
 
-	    while (this.pos < this.buffer.length) {
+	    while (this.hasCurrentByte()) {
+	      const byte = this.currentByte();
+
 	      // If the previous line ended with an end-of-line, we need to check
 	      // if the next character is also an end-of-line.
 	      if (this.eventEndCheck) {
@@ -27017,10 +27538,9 @@ function requireEventsourceStream () {
 	        if (this.crlfCheck) {
 	          // If the current character is a line feed, we can remove it
 	          // from the buffer and reset the crlfCheck flag
-	          if (this.buffer[this.pos] === LF) {
-	            this.buffer = this.buffer.subarray(this.pos + 1);
-	            this.pos = 0;
+	          if (byte === LF) {
 	            this.crlfCheck = false;
+	            this.consumeCurrentByte();
 
 	            // It is possible that the line feed is not the end of the
 	            // event. We need to check if the next character is an
@@ -27036,19 +27556,17 @@ function requireEventsourceStream () {
 	          this.crlfCheck = false;
 	        }
 
-	        if (this.buffer[this.pos] === LF || this.buffer[this.pos] === CR) {
+	        if (byte === LF || byte === CR) {
 	          // If the current character is a carriage return, we need to
 	          // set the crlfCheck flag to true, as we need to check if the
 	          // next character is a line feed so we can remove it from the
 	          // buffer
-	          if (this.buffer[this.pos] === CR) {
+	          if (byte === CR) {
 	            this.crlfCheck = true;
 	          }
 
-	          this.buffer = this.buffer.subarray(this.pos + 1);
-	          this.pos = 0;
-	          if (
-	            this.event.data !== undefined || this.event.event || this.event.id || this.event.retry) {
+	          this.consumeCurrentByte();
+	          if (this.hasPendingEvent()) {
 	            this.processEvent(this.event);
 	          }
 	          this.clearEvent();
@@ -27062,22 +27580,23 @@ function requireEventsourceStream () {
 
 	      // If the current character is an end-of-line, we can process the
 	      // line
-	      if (this.buffer[this.pos] === LF || this.buffer[this.pos] === CR) {
+	      if (byte === LF || byte === CR) {
 	        // If the current character is a carriage return, we need to
 	        // set the crlfCheck flag to true, as we need to check if the
 	        // next character is a line feed
-	        if (this.buffer[this.pos] === CR) {
+	        if (byte === CR) {
 	          this.crlfCheck = true;
 	        }
 
 	        // In any case, we can process the line as we reached an
 	        // end-of-line character
-	        this.parseLine(this.buffer.subarray(0, this.pos), this.event);
-
-	        // Remove the processed line from the buffer
-	        this.buffer = this.buffer.subarray(this.pos + 1);
-	        // Reset the position as we removed the processed line from the buffer
-	        this.pos = 0;
+	        try {
+	          this.parseLine(this.readLine(), this.event);
+	        } catch (error) {
+	          callback(error);
+	          return
+	        }
+	        this.consumeCurrentByte();
 	        // A line was processed and this could be the end of the event. We need
 	        // to check if the next line is empty to determine if the event is
 	        // finished.
@@ -27085,15 +27604,28 @@ function requireEventsourceStream () {
 	        continue
 	      }
 
-	      this.pos++;
+	      // readLine() is only called after CR or LF. Reject an unfinished line
+	      // before it can retain an unbounded number of decoded chunks. The seven
+	      // extra bytes allow the longest field prefix ("event: " or "retry: ").
+	      if (this.maxEventSize > 0 && ++this.lineLength > this.maxEventSize + 7) {
+	        callback(createMaxEventSizeExceededError());
+	        return
+	      }
+	      this.advanceCursor();
 	    }
 
 	    callback();
 	  }
 
+	  _destroy (error, callback) {
+	    this.chunks.length = 0;
+	    this.clearEvent();
+	    super._destroy(error, callback);
+	  }
+
 	  /**
 	   * @param {Buffer} line
-	   * @param {EventStreamEvent} event
+	   * @param {EventSourceStreamEvent} event
 	   */
 	  parseLine (line, event) {
 	    // If the line is empty (a blank line)
@@ -27110,65 +27642,72 @@ function requireEventsourceStream () {
 	      return
 	    }
 
-	    let field = '';
-	    let value = '';
+	    let fieldLength = line.length;
+	    let valueStart = line.length;
 
 	    // If the line contains a U+003A COLON character (:)
 	    if (colonPosition !== -1) {
-	      // Collect the characters on the line before the first U+003A COLON
-	      // character (:), and let field be that string.
-	      // TODO: Investigate if there is a more performant way to extract the
-	      // field
-	      // see: https://github.com/nodejs/undici/issues/2630
-	      field = line.subarray(0, colonPosition).toString('utf8');
+	      fieldLength = colonPosition;
 
 	      // Collect the characters on the line after the first U+003A COLON
 	      // character (:), and let value be that string.
 	      // If value starts with a U+0020 SPACE character, remove it from value.
-	      let valueStart = colonPosition + 1;
+	      valueStart = colonPosition + 1;
 	      if (line[valueStart] === SPACE) {
 	        ++valueStart;
 	      }
-	      // TODO: Investigate if there is a more performant way to extract the
-	      // value
-	      // see: https://github.com/nodejs/undici/issues/2630
-	      value = line.subarray(valueStart).toString('utf8');
-
-	      // Otherwise, the string is not empty but does not contain a U+003A COLON
-	      // character (:)
-	    } else {
-	      // Process the field using the steps described below, using the whole
-	      // line as the field name, and the empty string as the field value.
-	      field = line.toString('utf8');
-	      value = '';
 	    }
 
-	    // Modify the event with the field name and value. The value is also
-	    // decoded as UTF-8
-	    switch (field) {
-	      case 'data':
-	        if (event[field] === undefined) {
-	          event[field] = value;
-	        } else {
-	          event[field] += `\n${value}`;
-	        }
-	        break
-	      case 'retry':
-	        if (isASCIINumber(value)) {
-	          event[field] = value;
-	        }
-	        break
-	      case 'id':
-	        if (isValidLastEventId(value)) {
-	          event[field] = value;
-	        }
-	        break
-	      case 'event':
-	        if (value.length > 0) {
-	          event[field] = value;
-	        }
-	        break
+	    if (isFieldName(line, fieldLength, DATA)) {
+	      if (this.maxEventSize > 0 && this.dataLineCount >= this.maxDataLines) {
+	        throw createMaxEventSizeExceededError()
+	      }
+	      const valueBytes = line.length - valueStart;
+	      const dataSize = this.eventFieldSizes.data + (event.data === undefined ? 0 : 1) + valueBytes;
+	      this.setEventFieldSize('data', dataSize);
+
+	      const value = line.toString('utf8', valueStart);
+
+	      if (event.data === undefined) {
+	        event.data = value;
+	      } else {
+	        event.data += `\n${value}`;
+	      }
+	      this.dataLineCount++;
+	      return
 	    }
+
+	    if (isFieldName(line, fieldLength, RETRY)) {
+	      if (isASCIINumberBytes(line, valueStart)) {
+	        this.setEventFieldSize('retry', line.length - valueStart);
+	        event.retry = line.toString('utf8', valueStart);
+	      }
+	      return
+	    }
+
+	    if (isFieldName(line, fieldLength, ID)) {
+	      if (isValidLastEventIdBytes(line, valueStart)) {
+	        this.setEventFieldSize('id', line.length - valueStart);
+	        event.id = line.toString('utf8', valueStart);
+	      }
+	      return
+	    }
+
+	    if (isFieldName(line, fieldLength, EVENT)) {
+	      if (valueStart < line.length) {
+	        this.setEventFieldSize('event', line.length - valueStart);
+	        event.event = line.toString('utf8', valueStart);
+	      }
+	    }
+	  }
+
+	  setEventFieldSize (field, size) {
+	    const eventSize = this.eventSize - this.eventFieldSizes[field] + size;
+	    if (this.maxEventSize > 0 && eventSize > this.maxEventSize) {
+	      throw createMaxEventSizeExceededError()
+	    }
+	    this.eventSize = eventSize;
+	    this.eventFieldSizes[field] = size;
 	  }
 
 	  /**
@@ -27197,12 +27736,159 @@ function requireEventsourceStream () {
 	  }
 
 	  clearEvent () {
-	    this.event = {
-	      data: undefined,
-	      event: undefined,
-	      id: undefined,
-	      retry: undefined
-	    };
+	    this.event.data = undefined;
+	    this.event.event = undefined;
+	    this.event.id = undefined;
+	    this.event.retry = undefined;
+	    this.eventSize = 0;
+	    this.dataLineCount = 0;
+	    this.eventFieldSizes.data = 0;
+	    this.eventFieldSizes.event = 0;
+	    this.eventFieldSizes.id = 0;
+	    this.eventFieldSizes.retry = 0;
+	  }
+
+	  hasPendingEvent () {
+	    return this.event.data !== undefined ||
+	      this.event.event !== undefined ||
+	      this.event.id !== undefined ||
+	      this.event.retry !== undefined
+	  }
+
+	  hasCurrentByte () {
+	    return this.chunkIndex < this.chunks.length &&
+	      this.pos < this.chunks[this.chunkIndex].length
+	  }
+
+	  currentByte () {
+	    return this.chunks[this.chunkIndex][this.pos]
+	  }
+
+	  consumeCurrentByte () {
+	    this.advanceCursor();
+	    this.syncLineStartToCursor();
+	  }
+
+	  advanceCursor () {
+	    this.pos++;
+
+	    while (this.chunkIndex < this.chunks.length && this.pos >= this.chunks[this.chunkIndex].length) {
+	      this.chunkIndex++;
+	      this.pos = 0;
+	    }
+	  }
+
+	  syncLineStartToCursor () {
+	    this.lineChunkIndex = this.chunkIndex;
+	    this.linePos = this.pos;
+	    this.lineLength = 0;
+	    this.dropConsumedChunks();
+	  }
+
+	  dropConsumedChunks () {
+	    if (this.lineChunkIndex > 0) {
+	      const consumed = this.lineChunkIndex;
+	      this.chunks.splice(0, consumed);
+	      this.lineChunkIndex = 0;
+	      this.chunkIndex -= consumed;
+	    }
+
+	    if (this.chunkIndex === this.chunks.length) {
+	      this.chunks.length = 0;
+	      this.chunkIndex = 0;
+	      this.pos = 0;
+	      this.lineChunkIndex = 0;
+	      this.linePos = 0;
+	    }
+	  }
+
+	  readLine () {
+	    if (this.lineChunkIndex === this.chunkIndex) {
+	      return this.chunks[this.chunkIndex].subarray(this.linePos, this.pos)
+	    }
+
+	    const chunks = [];
+	    let length = 0;
+
+	    for (let i = this.lineChunkIndex; i <= this.chunkIndex; i++) {
+	      const chunk = this.chunks[i];
+	      const start = i === this.lineChunkIndex ? this.linePos : 0;
+	      const end = i === this.chunkIndex ? this.pos : chunk.length;
+	      const slice = chunk.subarray(start, end);
+	      length += slice.length;
+	      chunks.push(slice);
+	    }
+
+	    return Buffer.concat(chunks, length)
+	  }
+
+	  peekBufferedByte (offset) {
+	    let chunkIndex = this.lineChunkIndex;
+	    let pos = this.linePos;
+
+	    while (chunkIndex < this.chunks.length) {
+	      const chunk = this.chunks[chunkIndex];
+	      const remaining = chunk.length - pos;
+
+	      if (offset < remaining) {
+	        return chunk[pos + offset]
+	      }
+
+	      offset -= remaining;
+	      chunkIndex++;
+	      pos = 0;
+	    }
+	  }
+
+	  discardLeadingBytes (count) {
+	    while (count > 0 && this.lineChunkIndex < this.chunks.length) {
+	      const chunk = this.chunks[this.lineChunkIndex];
+	      const remaining = chunk.length - this.linePos;
+
+	      if (count < remaining) {
+	        this.linePos += count;
+	        count = 0;
+	      } else {
+	        count -= remaining;
+	        this.lineChunkIndex++;
+	        this.linePos = 0;
+	      }
+	    }
+
+	    this.chunkIndex = this.lineChunkIndex;
+	    this.pos = this.linePos;
+	    this.dropConsumedChunks();
+	  }
+
+	  handleBOM () {
+	    const first = this.peekBufferedByte(0);
+	    const second = this.peekBufferedByte(1);
+	    const third = this.peekBufferedByte(2);
+
+	    if (second === undefined) {
+	      if (first === BOM[0]) {
+	        return true
+	      }
+
+	      this.checkBOM = false;
+	      return true
+	    }
+
+	    if (third === undefined) {
+	      if (first === BOM[0] && second === BOM[1]) {
+	        return true
+	      }
+
+	      this.checkBOM = false;
+	      return false
+	    }
+
+	    if (first === BOM[0] && second === BOM[1] && third === BOM[2]) {
+	      this.discardLeadingBytes(3);
+	    }
+
+	    this.checkBOM = false;
+	    return !this.hasCurrentByte()
 	  }
 	}
 
@@ -27230,6 +27916,7 @@ function requireEventsource () {
 	const { delay } = requireUtil$1();
 	const { kEnumerableProperty } = requireUtil$8();
 	const { environmentSettingsObject } = requireUtil$7();
+	const { getGlobalDispatcher } = requireGlobal();
 
 	let experimentalWarned = false;
 
@@ -27511,6 +28198,7 @@ function requireEventsource () {
 
 	      const eventSourceStream = new EventSourceStream({
 	        eventSourceSettings: this.#state,
+	        maxEventSize: this.#dispatcher.eventSourceOptions?.maxEventSize,
 	        push: (event) => {
 	          this.dispatchEvent(createFastMessageEvent(
 	            event.type,
@@ -27689,7 +28377,8 @@ function requireEventsource () {
 	  },
 	  {
 	    key: 'dispatcher', // undici only
-	    converter: webidl.converters.any
+	    converter: webidl.converters.any,
+	    defaultValue: () => getGlobalDispatcher()
 	  }
 	]);
 
@@ -28122,31 +28811,12 @@ function error$1(message, properties = {}) {
     issueCommand('error', toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
 
-const balanced = (a, b, str) => {
-    const ma = a instanceof RegExp ? maybeMatch(a, str) : a;
-    const mb = b instanceof RegExp ? maybeMatch(b, str) : b;
-    const r = ma !== null && mb != null && range$2(ma, mb, str);
-    return (r && {
-        start: r[0],
-        end: r[1],
-        pre: str.slice(0, r[0]),
-        body: str.slice(r[0] + ma.length, r[1]),
-        post: str.slice(r[1] + mb.length),
-    });
-};
-const maybeMatch = (reg, str) => {
-    const m = str.match(reg);
-    return m ? m[0] : null;
-};
 const range$2 = (a, b, str) => {
     let begs, beg, left, right = undefined, result;
     let ai = str.indexOf(a);
     let bi = str.indexOf(b, ai + 1);
     let i = ai;
     if (ai >= 0 && bi > 0) {
-        if (a === b) {
-            return [ai, bi];
-        }
         begs = [];
         left = str.length;
         while (i >= 0 && !result) {
@@ -28176,11 +28846,11 @@ const range$2 = (a, b, str) => {
     return result;
 };
 
-const escSlash = '\0SLASH' + Math.random() + '\0';
-const escOpen = '\0OPEN' + Math.random() + '\0';
-const escClose = '\0CLOSE' + Math.random() + '\0';
-const escComma = '\0COMMA' + Math.random() + '\0';
-const escPeriod = '\0PERIOD' + Math.random() + '\0';
+const escSlash = '\0SLASH' + Math.random().toFixed(16) + '\0';
+const escOpen = '\0OPEN' + Math.random().toFixed(16) + '\0';
+const escClose = '\0CLOSE' + Math.random().toFixed(16) + '\0';
+const escComma = '\0COMMA' + Math.random().toFixed(16) + '\0';
+const escPeriod = '\0PERIOD' + Math.random().toFixed(16) + '\0';
 const escSlashPattern = new RegExp(escSlash, 'g');
 const escOpenPattern = new RegExp(escOpen, 'g');
 const escClosePattern = new RegExp(escClose, 'g');
@@ -28192,6 +28862,52 @@ const closePattern = /\\}/g;
 const commaPattern = /\\,/g;
 const periodPattern = /\\\./g;
 const EXPANSION_MAX = 100_000;
+// `EXPANSION_MAX` caps the *number* of expansions, but not their length. An
+// input like `'{a,b}'.repeat(1500)` stays under that count - its output is
+// truncated to 100k results - while making every result ~1500 characters
+// long. The result set, and the intermediate arrays built while combining
+// brace sets, then grow large enough to exhaust memory and crash the process
+// (CVE-2026-14257). `EXPANSION_MAX_LENGTH` bounds the total number of
+// characters the accumulator may hold at any point, so memory stays flat no
+// matter how many brace groups are chained. The limit sits well above any
+// realistic expansion (100k results hitting `EXPANSION_MAX` measure ~1M
+// characters) so legitimate input is unaffected.
+const EXPANSION_MAX_LENGTH = 4_000_000;
+// `expand_` recurses once per level of brace *nesting* - both when expanding a
+// set's comma members and when re-wrapping a set whose body is a single part.
+// The CVE-2026-14257 fix made the *tail* iterative (recursion on `m.post`, one
+// level per chained group), which left nesting depth unbounded: about 3,100
+// levels of `{{{...a,b...}}}` - only ~6KB of input - exhausted the native stack
+// and crashed the process. `EXPANSION_MAX_DEPTH` bounds how deep the parser
+// will follow nesting. It sits far above any realistic pattern and well below
+// the depth at which the stack runs out.
+const EXPANSION_MAX_DEPTH = 1_000;
+// Bash keeps a quirk where a brace group followed by a comma set still expands
+// (`{a},b}`). The parser implements it by rewriting the string and restarting
+// the scan, absorbing one `}` per pass. `n` trailing braces therefore cost `n`
+// full passes over a string that itself grows by one `escClose` sentinel each
+// time - quadratic in `n`, with a ~26x constant from the sentinel's length.
+// 128KB of `'{a}' + '}'.repeat(n) + ',z}'` blocked the event loop for 27
+// seconds to produce two results. `EXPANSION_MAX_REWRITES` bounds how many
+// times the scan may restart. Real `{a},b}` input needs a handful.
+const EXPANSION_MAX_REWRITES = 1_000;
+// `EXPANSION_MAX_STEPS` bounds the work one `expand` call does, which `max`,
+// `maxLength` and `maxDepth` don't: nested sets are rescanned at every level
+// and chained groups each rebuild up to `max` results, so 2KB of input could
+// block the event loop for over 30 seconds. Each character scanned, result
+// built and sequence value generated is a step, and each `expand_` call costs
+// `CALL_STEPS` more. Past the budget, the set being expanded and everything
+// after it stay literal. A glob needs a few hundred steps, and nesting all the
+// way to `EXPANSION_MAX_DEPTH` about 4M.
+const EXPANSION_MAX_STEPS = 20_000_000;
+// What one `expand_` call costs on top of what it scans and builds. Setting
+// one up takes about as long as scanning 16 characters, and a set whose
+// results are wrapped to be expanded again makes one call per result, each
+// scanning and building next to nothing: 64KB of
+// `('{{' + ','.repeat(316) + '}{' + ','.repeat(316) + '}}').repeat(n)` made
+// 4M such calls, which spent the budget three times as slowly as anything
+// else.
+const CALL_STEPS = 16;
 function numeric(str) {
     return !isNaN(str) ? parseInt(str, 10) : str.charCodeAt(0);
 }
@@ -28211,36 +28927,152 @@ function unescapeBraces(str) {
         .replace(escCommaPattern, ',')
         .replace(escPeriodPattern, '.');
 }
+// Like `target.push(...items)` but doesn't overflow the stack
+function pushAll(target, items) {
+    for (let i = 0; i < items.length; i++) {
+        target.push(items[i]);
+    }
+}
+// `balanced`, run on `masked` (see `maskUnmatchedOpens`), sliced from `str`
+// and charged for the characters it walks: up to the group's `}`, or the
+// whole string when there is no match or unmatched `{` come first, which
+// `unmatched` then flags for masking. Once a call overdraws the budget, it
+// and every later one return undefined, so the rest stays literal.
+function balancedWithBudget(str, masked, budget) {
+    if (budget.remaining < 0) {
+        return undefined;
+    }
+    const r = range$2('{', '}', masked);
+    const unmatched = r !== undefined && masked.indexOf('{') < r[0];
+    budget.remaining -= r && !unmatched ? r[1] + 1 : str.length;
+    if (!r || budget.remaining < 0) {
+        return undefined;
+    }
+    return {
+        end: r[1],
+        pre: str.slice(0, r[0]),
+        body: str.slice(r[0] + 1, r[1]),
+        post: str.slice(r[1] + 1),
+        unmatched,
+    };
+}
+// `masked` with every `{` that has no matching `}` swapped for a `\0`, which
+// keeps the length, so a scan of it still lines up with the string it was
+// made from. Such a `{` is literal either way, but `balanced` only learns that
+// one is unmatched by reading to the end of the string, so with one at the
+// head of every group (`'{a,{b,c}'.repeat(n)`) each scan read the rest of the
+// input. That was quadratic, and once the step budget charged for it, it ran
+// out partway through and left the rest literal. A scan of the masked copy
+// stops at the group's `}`. It is one pass, charged as such.
+function maskUnmatchedOpens(masked, budget) {
+    budget.remaining -= masked.length;
+    const open = [];
+    for (let i = 0; i < masked.length; i++) {
+        const c = masked.charCodeAt(i);
+        if (c === 0x7b) {
+            open.push(i);
+        }
+        else if (c === 0x7d && open.length) {
+            open.pop();
+        }
+    }
+    let out = '';
+    let last = 0;
+    for (let i = 0; i < open.length; i++) {
+        const at = open[i];
+        out += masked.slice(last, at) + '\0';
+        last = at + 1;
+    }
+    return out + masked.slice(last);
+}
+// Whether `str` has a `,` not followed by another `,`, with a `}` after it on
+// the same line - what `/,(?!,).*\}/.test(str)` asks, answered in one pass from
+// the end. The regex tries every `,` and backtracks through the rest of its
+// line from each, which is quadratic, and the `{a},b}` rewrite asks again on
+// every pass. Like a scan, it is charged for the whole string and refused if
+// that overdraws the budget.
+function commaSetFollows(str, budget) {
+    budget.remaining -= str.length;
+    if (budget.remaining < 0) {
+        return false;
+    }
+    // Whether a `}` follows the current position before the line ends
+    let close = false;
+    for (let i = str.length - 1; i >= 0; i--) {
+        const c = str.charCodeAt(i);
+        if (c === 0x7d) {
+            close = true;
+        }
+        else if (c === 0x0a || c === 0x0d || c === 0x2028 || c === 0x2029) {
+            // A line terminator, which `.` does not match
+            close = false;
+        }
+        else if (c === 0x2c && close && str.charCodeAt(i + 1) !== 0x2c) {
+            return true;
+        }
+    }
+    return false;
+}
 /**
  * Basically just str.split(","), but handling cases
  * where we have nested braced sections, which should be
  * treated as individual members, like {a,{b,c},d}
+ *
+ * Returns `undefined` if the step budget runs out before the whole set is
+ * split, since splitting what is left on every comma would tear apart the
+ * nested sets it still holds.
  */
-function parseCommaParts(str) {
-    if (!str) {
-        return [''];
-    }
+function parseCommaParts(str, budget) {
     const parts = [];
-    const m = balanced('{', '}', str);
-    if (!m) {
-        return str.split(',');
+    // Walk the brace groups iteratively. Recursing on `post` once per group let a
+    // chain of them exhaust the stack - the parsing-side counterpart to
+    // the `expand_` overflow fixed for CVE-2026-14257, and not something `max` or
+    // `maxLength` can bound, since it happens before expansion.
+    //
+    // The part the next chunk continues
+    let carry = '';
+    for (;;) {
+        // A set's body holds no unmatched `{`, so there is nothing to mask.
+        const m = balancedWithBudget(str, str, budget);
+        if (budget.remaining < 0) {
+            return undefined;
+        }
+        if (!m) {
+            const tail = str.split(',');
+            tail[0] = carry + tail[0];
+            pushAll(parts, tail);
+            return parts;
+        }
+        const { pre, body, post } = m;
+        const p = pre.split(',');
+        p[0] = carry + p[0];
+        p[p.length - 1] += '{' + body + '}';
+        if (!post.length) {
+            pushAll(parts, p);
+            return parts;
+        }
+        carry = p.pop();
+        pushAll(parts, p);
+        str = post;
     }
-    const { pre, body, post } = m;
-    const p = pre.split(',');
-    p[p.length - 1] += '{' + body + '}';
-    const postParts = parseCommaParts(post);
-    if (post.length) {
-        p[p.length - 1] += postParts.shift();
-        p.push.apply(p, postParts);
-    }
-    parts.push.apply(parts, p);
-    return parts;
+}
+// An option that is left out, or that is NaN, gets its default. Every
+// comparison against NaN is false, so a NaN bound would never be reached:
+// `{ maxSteps: NaN }` let 15KB of input block the event loop for 16 seconds,
+// and `{ maxDepth: NaN }` overflowed the stack again (CVE-2026-102278). Pass
+// `Infinity` to lift a bound.
+function bound(value, fallback) {
+    return value === undefined || isNaN(value) ? fallback : value;
 }
 function expand$1(str, options = {}) {
     if (!str) {
         return [];
     }
-    const { max = EXPANSION_MAX } = options;
+    const max = bound(options.max, EXPANSION_MAX);
+    const maxLength = bound(options.maxLength, EXPANSION_MAX_LENGTH);
+    const maxDepth = bound(options.maxDepth, EXPANSION_MAX_DEPTH);
+    const maxRewrites = bound(options.maxRewrites, EXPANSION_MAX_REWRITES);
+    const maxSteps = bound(options.maxSteps, EXPANSION_MAX_STEPS);
     // I don't know why Bash 4.3 does this, but it does.
     // Anything starting with {} will have the first two bytes preserved
     // but *only* at the top level, so {},a}b will not expand to anything,
@@ -28250,7 +29082,7 @@ function expand$1(str, options = {}) {
     if (str.slice(0, 2) === '{}') {
         str = '\\{\\}' + str.slice(2);
     }
-    return expand_(escapeBraces(str), max, true).map(unescapeBraces);
+    return expand_(escapeBraces(str), max, maxLength, maxDepth, 0, maxRewrites, { remaining: maxSteps }, true).map(unescapeBraces);
 }
 function embrace(str) {
     return '{' + str + '}';
@@ -28264,111 +29096,268 @@ function lte(i, y) {
 function gte(i, y) {
     return i >= y;
 }
-function expand_(str, max, isTop) {
-    /** @type {string[]} */
-    const expansions = [];
-    const m = balanced('{', '}', str);
-    if (!m)
-        return [str];
-    // no need to expand pre, since it is guaranteed to be free of brace-sets
-    const pre = m.pre;
-    const post = m.post.length ? expand_(m.post, max, false) : [''];
-    if (/\$$/.test(m.pre)) {
-        for (let k = 0; k < post.length && k < max; k++) {
-            const expansion = pre + '{' + m.body + '}' + post[k];
-            expansions.push(expansion);
+// Build `{ acc[a] + pre + values[v] }` for every combination, capping the
+// number of results at `max` and the total number of characters at `maxLength`.
+// This is the one place output grows, so bounding it here keeps the single
+// accumulator - and therefore memory - flat regardless of how many brace groups
+// are combined (CVE-2026-14257). Each result built is a step, since `max` and
+// `maxLength` bound one combination, not how many brace groups are combined.
+function combine(acc, pre, values, max, maxLength, dropEmpties, budget) {
+    const out = [];
+    let length = 0;
+    // Bash drops empty results at the top level, and they don't count against
+    // `max`, so `max` bounds the number of *kept* results. Only an empty
+    // `acc[a] + pre` can make one, so for those the empty values are skipped
+    // without being visited. Visiting them one at a time let a set of empties
+    // cost `acc.length * values.length` while keeping nothing.
+    let nonEmpty;
+    outer: for (let a = 0; a < acc.length; a++) {
+        const prefix = acc[a] + pre;
+        let vs = values;
+        if (dropEmpties && !prefix) {
+            if (!nonEmpty)
+                nonEmpty = values.filter(v => v);
+            vs = nonEmpty;
+        }
+        for (let v = 0; v < vs.length; v++) {
+            if (out.length >= max)
+                break outer;
+            const expansion = prefix + vs[v];
+            if (length + expansion.length > maxLength)
+                break outer;
+            out.push(expansion);
+            length += expansion.length;
         }
     }
-    else {
+    budget.remaining -= out.length;
+    return out;
+}
+// The expansion values of a single numeric (`1..5`) or alphabetic (`a..e..2`)
+// sequence body, or `undefined` if the step budget runs out generating them.
+function expandSequence(body, isAlphaSequence, max, maxLength, budget) {
+    const n = body.split(/\.\./);
+    const N = [];
+    // A sequence body always splits into two or three parts, but the compiler
+    // can't know that.
+    /* c8 ignore start */
+    if (n[0] === undefined || n[1] === undefined) {
+        return N;
+    }
+    /* c8 ignore stop */
+    const x = numeric(n[0]);
+    const y = numeric(n[1]);
+    const width = Math.max(n[0].length, n[1].length);
+    let incr = n.length === 3 && n[2] !== undefined ?
+        Math.max(Math.abs(numeric(n[2])), 1)
+        : 1;
+    let test = lte;
+    const reverse = y < x;
+    if (reverse) {
+        incr *= -1;
+        test = gte;
+    }
+    const pad = n.some(isPadded);
+    // A padded value is built a character at a time to `width`, which the input
+    // sets, so it costs one step per character: 64KB of
+    // `('{' + '0'.repeat(100) + '..99999}').repeat(n)` took 7 seconds charged
+    // one step per value.
+    const cost = pad ? width : 1;
+    let length = 0;
+    for (let i = x; test(i, y) && N.length < max; i += incr) {
+        // Each value is a step. `max` and `maxLength` bound one sequence, but a
+        // chain of them still generated up to `max` values each, however few
+        // combining could keep.
+        budget.remaining -= cost;
+        if (budget.remaining < 0) {
+            return undefined;
+        }
+        let c;
+        if (isAlphaSequence) {
+            c = String.fromCharCode(i);
+            if (c === '\\') {
+                c = '';
+            }
+        }
+        else {
+            c = String(i);
+            if (pad) {
+                const need = width - c.length;
+                if (need > 0) {
+                    const z = new Array(need + 1).join('0');
+                    if (i < 0) {
+                        c = '-' + z + c.slice(1);
+                    }
+                    else {
+                        c = z + c;
+                    }
+                }
+            }
+        }
+        if (length + c.length > maxLength)
+            break;
+        N.push(c);
+        length += c.length;
+    }
+    return N;
+}
+function expand_(str, max, maxLength, maxDepth, depth, maxRewrites, budget, isTop) {
+    // An overdraft here makes the first scan refuse, so `str` stays literal.
+    budget.remaining -= CALL_STEPS;
+    // Too deeply nested to keep following: treat the rest as literal, the same
+    // way a group that cannot expand is already handled. Truncating rather than
+    // throwing keeps `expand` total, matching `max` and `maxLength`.
+    if (depth > maxDepth) {
+        return [str];
+    }
+    // Consume the string's top-level brace groups left to right, threading a
+    // running set of combined prefixes (`acc`). Expanding the tail iteratively -
+    // rather than recursing on `m.post` once per group - keeps the native stack
+    // depth constant, so deeply chained input (`'{a,b}'.repeat(3000)`) can no
+    // longer overflow the stack, and leaves a single accumulator whose size
+    // `maxLength` bounds directly (CVE-2026-14257).
+    let acc = [''];
+    // Bash drops empty results, but only when the *first* top-level group is a
+    // comma set - a sequence like `{a..\}` may legitimately yield ''. The drop
+    // is on the final strings, so it is applied to whichever `combine` produces
+    // them (the one with no brace set left in the tail).
+    // How many times the `{a},b}` rewrite below has restarted the scan. Each pass
+    // re-reads the whole string, so leaving this unbounded is quadratic.
+    let rewrites = 0;
+    let dropEmpties = false;
+    let firstGroup = true;
+    // `str` with its unmatched `{` masked, once a scan has run into them
+    let masked = str;
+    for (;;) {
+        const m = balancedWithBudget(str, masked, budget);
+        // No brace set left, or no step budget left to look for one: the rest of
+        // the string is literal.
+        if (!m) {
+            return combine(acc, str, [''], max, maxLength, dropEmpties, budget);
+        }
+        if (m.unmatched) {
+            masked = maskUnmatchedOpens(masked, budget);
+        }
+        // no need to expand pre, since it is guaranteed to be free of brace-sets
+        const pre = m.pre;
+        // This set and the rest of the string, literal: for a set that cannot
+        // expand, and for one the step budget runs out on. Once it is overdrawn,
+        // every set still being expanded, at every level, stays literal like this -
+        // otherwise each level above would go on combining, and wrapping and
+        // expanding again, results the budget was too small for.
+        const literal = () => combine(acc, pre + '{' + m.body + '}' + m.post, [''], max, maxLength, dropEmpties, budget);
+        if (/\$$/.test(pre)) {
+            acc = combine(acc, pre + '{' + m.body + '}', [''], max, maxLength, dropEmpties && !m.post.length, budget);
+            firstGroup = false;
+            if (!m.post.length)
+                break;
+            str = m.post;
+            masked = masked.slice(m.end + 1);
+            continue;
+        }
         const isNumericSequence = /^-?\d+\.\.-?\d+(?:\.\.-?\d+)?$/.test(m.body);
         const isAlphaSequence = /^[a-zA-Z]\.\.[a-zA-Z](?:\.\.-?\d+)?$/.test(m.body);
         const isSequence = isNumericSequence || isAlphaSequence;
         const isOptions = m.body.indexOf(',') >= 0;
         if (!isSequence && !isOptions) {
             // {a},b}
-            if (m.post.match(/,(?!,).*\}/)) {
+            if (rewrites < maxRewrites && commaSetFollows(m.post, budget)) {
+                rewrites++;
                 str = m.pre + '{' + m.body + escClose + m.post;
-                return expand_(str, max, true);
+                // Taking a `}` away never gives an unmatched `{` a partner, so what
+                // is masked stays unmatched. The `{` it closed can be left without
+                // one, and the next scan masks it.
+                masked =
+                    masked.slice(0, m.end) + escClose + masked.slice(m.end + 1);
+                isTop = true;
+                continue;
             }
-            return [str];
+            // Nothing here expands, so the whole remaining string is literal.
+            return literal();
         }
-        let n;
+        if (firstGroup) {
+            dropEmpties = isTop && !isSequence;
+            firstGroup = false;
+        }
+        let values;
         if (isSequence) {
-            n = m.body.split(/\.\./);
+            values = expandSequence(m.body, isAlphaSequence, max, maxLength, budget);
+            if (!values) {
+                return literal();
+            }
         }
         else {
-            n = parseCommaParts(m.body);
+            let n = parseCommaParts(m.body, budget);
+            // The step budget ran out partway through the set.
+            if (!n) {
+                return literal();
+            }
             if (n.length === 1 && n[0] !== undefined) {
                 // x{{a,b}}y ==> x{a}y x{b}y
-                n = expand_(n[0], max, false).map(embrace);
+                n = expand_(n[0], max, maxLength, maxDepth, depth + 1, maxRewrites, budget, false).map(embrace);
+                // The step budget ran out expanding the set's only part.
+                if (budget.remaining < 0) {
+                    return literal();
+                }
                 //XXX is this necessary? Can't seem to hit it in tests.
                 /* c8 ignore start */
                 if (n.length === 1) {
-                    return post.map(p => m.pre + n[0] + p);
+                    const next = combine(acc, pre + n[0], [''], max, maxLength, dropEmpties && !m.post.length, budget);
+                    if (budget.remaining < 0) {
+                        return literal();
+                    }
+                    acc = next;
+                    if (!m.post.length)
+                        break;
+                    str = m.post;
+                    masked = masked.slice(m.end + 1);
+                    continue;
                 }
                 /* c8 ignore stop */
             }
-        }
-        // at this point, n is the parts, and we know it's not a comma set
-        // with a single entry.
-        let N;
-        if (isSequence && n[0] !== undefined && n[1] !== undefined) {
-            const x = numeric(n[0]);
-            const y = numeric(n[1]);
-            const width = Math.max(n[0].length, n[1].length);
-            let incr = n.length === 3 && n[2] !== undefined ?
-                Math.max(Math.abs(numeric(n[2])), 1)
-                : 1;
-            let test = lte;
-            const reverse = y < x;
-            if (reverse) {
-                incr *= -1;
-                test = gte;
+            // Values that `combine` is going to drop as empty produce no result, so
+            // they must not count against `max` - otherwise `{a,,b}` with `max: 2`
+            // would stop at `['a', '']` and yield one result instead of two. Skipping
+            // them outright keeps `values` bounded while leaving `max` a bound on
+            // *kept* results.
+            let dropsEmpties = dropEmpties && !m.post.length && !pre;
+            for (let d = 0; dropsEmpties && d < acc.length; d++) {
+                if (acc[d]) {
+                    dropsEmpties = false;
+                }
             }
-            const pad = n.some(isPadded);
-            N = [];
-            for (let i = x; test(i, y); i += incr) {
-                let c;
-                if (isAlphaSequence) {
-                    c = String.fromCharCode(i);
-                    if (c === '\\') {
-                        c = '';
+            values = [];
+            let valuesLength = 0;
+            outer: for (let j = 0; j < n.length; j++) {
+                const expanded = expand_(n[j], max, maxLength, maxDepth, depth + 1, maxRewrites, budget, false);
+                // The step budget ran out expanding a member.
+                if (budget.remaining < 0) {
+                    return literal();
+                }
+                for (let k = 0; k < expanded.length; k++) {
+                    const v = expanded[k];
+                    if (dropsEmpties && !v)
+                        continue;
+                    if (values.length >= max ||
+                        valuesLength + v.length > maxLength) {
+                        break outer;
                     }
-                }
-                else {
-                    c = String(i);
-                    if (pad) {
-                        const need = width - c.length;
-                        if (need > 0) {
-                            const z = new Array(need + 1).join('0');
-                            if (i < 0) {
-                                c = '-' + z + c.slice(1);
-                            }
-                            else {
-                                c = z + c;
-                            }
-                        }
-                    }
-                }
-                N.push(c);
-            }
-        }
-        else {
-            N = [];
-            for (let j = 0; j < n.length; j++) {
-                N.push.apply(N, expand_(n[j], max, false));
-            }
-        }
-        for (let j = 0; j < N.length; j++) {
-            for (let k = 0; k < post.length && expansions.length < max; k++) {
-                const expansion = pre + N[j] + post[k];
-                if (!isTop || isSequence || expansion) {
-                    expansions.push(expansion);
+                    values.push(v);
+                    valuesLength += v.length;
                 }
             }
         }
+        const next = combine(acc, pre, values, max, maxLength, dropEmpties && !m.post.length, budget);
+        // The step budget ran out combining the set's values in.
+        if (budget.remaining < 0) {
+            return literal();
+        }
+        acc = next;
+        if (!m.post.length)
+            break;
+        str = m.post;
+        masked = masked.slice(m.end + 1);
     }
-    return expansions;
+    return acc;
 }
 
 const MAX_PATTERN_LENGTH = 1024 * 64;
@@ -30609,41 +31598,6 @@ function isFileInManifestPath(file, manifestPath) {
     return file.startsWith(manifestPath + '/') || file === manifestPath;
 }
 
-const CONVENTIONAL_COMMIT_REGEX = /^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/;
-/**
- * Select commits up to the given sha (or all if null) and filter to conventional commits.
- * Preserves the order of the provided commits (newest-first).
- * When targetBranch is provided, only commits whose branch matches targetBranch are included.
- */
-function reduceCommitsToConventionalSinceLastRelease(commits, sha, includeChores = false, targetBranch) {
-    if (!Array.isArray(commits) || commits.length === 0)
-        return [];
-    let selected = commits;
-    if (sha) {
-        const idx = commits.findIndex(c => c.sha === sha);
-        if (idx !== -1) {
-            selected = commits.slice(0, idx + 1);
-        }
-        else {
-            // treat unknown sha as null (include all)
-            selected = commits;
-        }
-    }
-    return selected.filter(c => {
-        if (!c || typeof c.title !== 'string')
-            return false;
-        if (targetBranch !== undefined && c.branch !== undefined && c.branch !== targetBranch)
-            return false;
-        const m = CONVENTIONAL_COMMIT_REGEX.exec(c.title.trim());
-        if (!m)
-            return false;
-        const type = m[1].toLowerCase();
-        if (type === 'chore' && !includeChores)
-            return false;
-        return true;
-    });
-}
-
 const debugEnabled = process.env.ARP_DEBUG === 'true';
 let isDebug = debugEnabled;
 function setDebug(enabled) {
@@ -30667,76 +31621,206 @@ function debug(...args) {
     }
 }
 
+const HEADER = /^(\w+)(?:\(([^)]+)\))?(!)?:[ \t]*(\S.*)$/;
+const CONVENTIONAL_COMMIT_TYPES = new Set(['feat', 'fix', 'perf', 'refactor', 'docs', 'test', 'build', 'ci', 'style', 'chore', 'revert']);
+const TRAILER = /^ {0,3}(BREAKING[ -]CHANGE|[A-Za-z][A-Za-z0-9-]*)(?::[ \t]*| #)(.*)$/;
+const REFERENCE = /^(refs?|fixes?|closes?|resolves?)$/i;
+function trimBlankLines(text) {
+    return text.replace(/^(?:[ \t]*\n)+|(?:\n[ \t]*)+$/g, '');
+}
+function fenceTracker() {
+    let fence;
+    return line => {
+        if (fence) {
+            const closing = /^ {0,3}(`+|~+)[ \t]*$/.exec(line);
+            if (closing && closing[1][0] === fence[0] && closing[1].length >= fence.length) {
+                fence = undefined;
+            }
+            return true;
+        }
+        const opening = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+        if (!opening || (opening[1][0] === '`' && opening[2].includes('`')))
+            return false;
+        fence = opening[1];
+        return true;
+    };
+}
+function parseEntry(lines) {
+    const title = lines[0];
+    const header = HEADER.exec(title);
+    const body = [];
+    const notes = [];
+    const references = [];
+    let releaseAs;
+    let inFooters = false;
+    let note;
+    const inFence = fenceTracker();
+    for (const line of lines.slice(1)) {
+        const fenced = inFence(line);
+        const candidate = fenced ? null : TRAILER.exec(line);
+        const trailer = candidate && (candidate[2].trim() || /^BREAKING[ -]CHANGE$/.test(candidate[1]))
+            ? candidate
+            : null;
+        if (trailer) {
+            inFooters = true;
+            note = undefined;
+            const [, token, value] = trailer;
+            if (/^BREAKING[ -]CHANGE$/.test(token)) {
+                note = [value];
+                notes.push(note);
+            }
+            else if (REFERENCE.test(token)) {
+                const id = /^#?(\S+)/.exec(value)?.[1];
+                if (id)
+                    references.push({ action: token.toLowerCase(), id });
+            }
+            else if (token.toLowerCase() === 'release-as') {
+                releaseAs = value.trim();
+            }
+        }
+        else if (note) {
+            note.push(line);
+        }
+        else if (!inFooters) {
+            body.push(line);
+        }
+    }
+    const breakingNotes = notes.map(lines => trimBlankLines(lines.join('\n'))).filter(Boolean);
+    return {
+        title,
+        message: trimBlankLines(lines.join('\n')),
+        type: header[1],
+        scope: header[2],
+        subject: header[4],
+        breaking: !!header[3] || breakingNotes.length > 0,
+        description: trimBlankLines(body.join('\n')),
+        breakingNotes,
+        references,
+        releaseAs,
+    };
+}
+/**
+ * Split a conventional message into entries, preserving each entry's Markdown and trailers.
+ * Only unindented standard conventional headers outside fences start additional entries.
+ */
+function parseCommitMessage(message) {
+    const lines = message.replace(/\r\n/g, '\n').split('\n');
+    if (!HEADER.test(lines[0]))
+        return [];
+    const entries = [];
+    let current = [lines[0]];
+    const inFence = fenceTracker();
+    for (const line of lines.slice(1)) {
+        const fenced = inFence(line);
+        const header = fenced ? null : HEADER.exec(line);
+        if (header && CONVENTIONAL_COMMIT_TYPES.has(header[1])) {
+            entries.push(parseEntry(current));
+            current = [line];
+        }
+        else {
+            current.push(line);
+        }
+    }
+    entries.push(parseEntry(current));
+    return entries;
+}
+/** Read one already-expanded commit, also accepting body-only messages from API consumers. */
+function parseCommit(commit) {
+    const message = (commit.message || '').replace(/\r\n/g, '\n');
+    const fullMessage = message.split('\n')[0] === commit.title
+        ? message
+        : `${commit.title}\n\n${message}`;
+    return parseCommitMessage(fullMessage)[0];
+}
+
+const CONVENTIONAL_COMMIT_REGEX = /^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/;
+function findLikelyType(type) {
+    const distances = [...CONVENTIONAL_COMMIT_TYPES]
+        .map(candidate => ({ candidate, distance: editDistance(type, candidate) }))
+        .sort((left, right) => left.distance - right.distance || left.candidate.localeCompare(right.candidate));
+    return distances[0]?.distance <= 2 ? distances[0].candidate : undefined;
+}
+function editDistance(left, right) {
+    const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+    for (let row = 1; row <= left.length; row++) {
+        let diagonal = previous[0];
+        previous[0] = row;
+        for (let column = 1; column <= right.length; column++) {
+            const above = previous[column];
+            const cost = left[row - 1] === right[column - 1] ? 0 : 1;
+            previous[column] = Math.min(previous[column] + 1, previous[column - 1] + 1, diagonal + cost);
+            diagonal = above;
+        }
+    }
+    return previous[right.length];
+}
+/**
+ * Select commits up to the given sha (or all if null) and filter to conventional commits.
+ * Preserves the order of the provided commits (newest-first).
+ * When targetBranch is provided, only commits whose branch matches targetBranch are included.
+ * includeAllCommits retains non-conventional commits and chores, excluding the release anchor itself.
+ */
+function reduceCommitsToConventionalSinceLastRelease(commits, sha, includeChores = false, targetBranch, includeAllCommits = false) {
+    if (!Array.isArray(commits) || commits.length === 0)
+        return [];
+    let selected = commits;
+    if (sha) {
+        const idx = commits.findIndex(c => c.sha === sha);
+        if (idx !== -1) {
+            selected = commits.slice(0, includeAllCommits ? idx : idx + 1);
+        }
+        else {
+            // treat unknown sha as null (include all)
+            selected = commits;
+        }
+    }
+    return selected.filter(c => {
+        if (!c || typeof c.title !== 'string')
+            return false;
+        if (targetBranch !== undefined && c.branch !== undefined && c.branch !== targetBranch)
+            return false;
+        if (includeAllCommits)
+            return true;
+        const m = CONVENTIONAL_COMMIT_REGEX.exec(c.title.trim());
+        if (!m)
+            return false;
+        const type = m[1].toLowerCase();
+        if (!CONVENTIONAL_COMMIT_TYPES.has(type)) {
+            const likelyType = findLikelyType(type);
+            const suggestion = likelyType ? ` Did you mean "${likelyType}"?` : '';
+            warn$1(`⚠️  Ignoring commit "${c.title}" with non-conventional type "${type}".${suggestion}`);
+            return false;
+        }
+        if (type === 'chore' && !includeChores)
+            return false;
+        return true;
+    });
+}
+
 /**
  * Shared commit context resolution for release commands.
  * Handles repository info fetch, tag/commit fetch with debug logging,
  * version-tag anchor resolution, conventional commit filtering, and
  * next-version calculation — logic shared by release-pr and calculate-next.
  */
-const CONVENTIONAL_COMMIT_LINE_REGEX = /^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/;
-const BREAKING_CHANGE_LINE_REGEX = /^BREAKING CHANGE:\s*(.+)$/;
 /**
- * Expands each commit whose message contains multiple conventional-commit lines
- * into one synthetic commit per line.
- *
- * For every commit:
- *  1. Split the full message into non-empty lines.
- *  2. If the first line does not match conventional-commit syntax, skip expansion
- *     and pass the commit through unchanged.
- *  3. If the last line matches `BREAKING CHANGE:` capture the text and remove it.
- *     A `BREAKING CHANGE:` line anywhere else logs a warning and is ignored.
- *  3. Keep only lines that match conventional-commit syntax.
- *  4. If no conventional lines are found the original commit is passed through unchanged.
- *  5. Otherwise one new commit is produced per conventional line:
- *     - Tags are preserved only on the first commit.
- *     - The first commit's message has the breaking-change text appended.
+ * Expand conventional messages while retaining each entry's body and footers.
+ * Tags stay on the first entry; all entries retain the original commit identity.
  */
 async function expandCommits(commits) {
     const result = [];
     for (const commit of commits) {
-        const rawLines = commit.message.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-        // If the first line is not a conventional commit, pass through as-is
-        if (rawLines.length === 0 || !CONVENTIONAL_COMMIT_LINE_REGEX.test(rawLines[0])) {
+        const entries = parseCommitMessage(commit.message);
+        if (entries.length === 0) {
             result.push(commit);
             continue;
         }
-        let breakingText;
-        const candidateLines = [];
-        // Check only the last line for BREAKING CHANGE:
-        const lastLine = rawLines[rawLines.length - 1];
-        const bcLastMatch = lastLine ? BREAKING_CHANGE_LINE_REGEX.exec(lastLine) : null;
-        const linesToProcess = bcLastMatch ? rawLines.slice(0, -1) : rawLines;
-        if (bcLastMatch) {
-            breakingText = bcLastMatch[0];
-        }
-        for (const line of linesToProcess) {
-            if (BREAKING_CHANGE_LINE_REGEX.test(line)) {
-                warn$1(`BREAKING CHANGE: found in non-last position in commit ${commit.sha.substring(0, 8)} — ignored`);
-            }
-            else {
-                candidateLines.push(line);
-            }
-        }
-        const conventionalLines = candidateLines.filter(l => CONVENTIONAL_COMMIT_LINE_REGEX.test(l));
-        if (conventionalLines.length === 0) {
-            debug(`No conventional commit lines found in commit ${commit.sha.substring(0, 8)} — passing through unchanged`);
-            result.push(commit);
-            continue;
-        }
-        const breakingSuffix = breakingText !== undefined
-            ? '\n\n' + breakingText
-            : '';
-        for (let i = 0; i < conventionalLines.length; i++) {
-            const line = conventionalLines[i];
+        for (let i = 0; i < entries.length; i++) {
             result.push({
-                sha: commit.sha,
+                ...commit,
                 tags: i === 0 ? commit.tags : [],
-                title: line,
-                message: i === 0 ? line + breakingSuffix : line,
-                author: commit.author,
-                date: commit.date,
-                files: commit.files,
-                branch: commit.branch,
+                title: entries[i].title,
+                message: entries[i].message,
             });
         }
     }
@@ -30747,11 +31831,10 @@ async function expandCommits(commits) {
  * fetches repo info, tags, commits, determines the version tag anchor, filters
  * conventional commits since the last release, and calculates the next version.
  *
- * Always returns a CommitContext. When there are no conventional commits,
- * `conventionalCommits` will be empty and `nextVersion`/`baseVersion` will be
- * empty strings — callers should treat this as a no-op / early exit.
+ * Always returns a CommitContext with resolved versions. includeAllCommits retains
+ * all commits since the release anchor for forced release PRs.
  */
-async function resolveCommitContext(config) {
+async function resolveCommitContext(config, includeAllCommits = false) {
     info('📂 Fetching repository information...');
     const repo = await config.provider.getRepository();
     info(`   Repository: ${repo.fullPath}`);
@@ -30848,7 +31931,7 @@ async function resolveCommitContext(config) {
             info(`   📌 No version tags found`);
         }
     }
-    const conventionalCommits = reduceCommitsToConventionalSinceLastRelease(commits, lastVersionTag?.commit, config.release.includeChores ?? false, targetBranch);
+    const conventionalCommits = reduceCommitsToConventionalSinceLastRelease(commits, lastVersionTag?.commit, config.release.includeChores ?? false, targetBranch, includeAllCommits);
     info(`   Found ${conventionalCommits.length} conventional commit(s) since last release`);
     const baseVersion = config.version ?? (lastVersionTag ? lastVersionTag.name : `${config.versionPrefix}0.1.0`);
     const nextVersion = config.versioner.calculateNextVersion(conventionalCommits, baseVersion, !!config.release.prerelease, config.release.includeChores ?? false).toString();
@@ -31286,8 +32369,9 @@ function requireUtils$1 () {
 
 	function escapeExpression(string) {
 	  if (typeof string !== 'string') {
-	    // don't escape SafeStrings, since they're already safe
-	    if (string && string.toHTML) {
+	    // don't escape SafeStrings, since they're already safe. Other values with a
+	    // "toHTML" key, e.g. from JSON context data, are escaped like any object.
+	    if (string && typeof string.toHTML === 'function') {
 	      return string.toHTML();
 	    } else if (string == null) {
 	      return '';
@@ -31354,11 +32438,15 @@ function requireException () {
 		      column = undefined,
 		      endColumn = undefined;
 
-		  if (loc) {
+		  // Hand-built ASTs may carry a partial loc; never let the location
+		  // bookkeeping mask the actual error message.
+		  if (loc && loc.start) {
 		    line = loc.start.line;
-		    endLineNumber = loc.end.line;
 		    column = loc.start.column;
-		    endColumn = loc.end.column;
+		    if (loc.end) {
+		      endLineNumber = loc.end.line;
+		      endColumn = loc.end.column;
+		    }
 
 		    message += ' - ' + line + ':' + column;
 		  }
@@ -31482,6 +32570,26 @@ function requireEach () {
 
 		var _exception2 = _interopRequireDefault(_exception);
 
+		/**
+		 * Close an unfinished iterator after the block body threw, like for...of does,
+		 * so that generators can run their cleanup code.
+		 *
+		 * Errors thrown while closing, including by a `return` getter, are ignored:
+		 * the block's error is the cause and is the one the caller must see.
+		 *
+		 * @param {Iterator} iterator the iterator that was being consumed
+		 */
+		function closeIterator(iterator) {
+		  try {
+		    var _close = iterator['return'];
+		    if (_utils.isFunction(_close)) {
+		      _close.call(iterator);
+		    }
+		  } catch (closeError) {
+		    // NOP
+		  }
+		}
+
 		exports['default'] = function (instance) {
 		  instance.registerHelper('each', function (context, options) {
 		    if (!options) {
@@ -31507,7 +32615,7 @@ function requireEach () {
 		      data = _utils.createFrame(options.data);
 		    }
 
-		    function execIteration(field, index, last) {
+		    function execIteration(field, index, last, value) {
 		      if (data) {
 		        data.key = field;
 		        data.index = index;
@@ -31519,9 +32627,9 @@ function requireEach () {
 		        }
 		      }
 
-		      ret = ret + fn(context[field], {
+		      ret = ret + fn(value, {
 		        data: data,
-		        blockParams: _utils.blockParams([context[field], field], [contextPath + field, null])
+		        blockParams: _utils.blockParams([value, field], [contextPath + field, null])
 		      });
 		    }
 
@@ -31529,18 +32637,24 @@ function requireEach () {
 		      if (_utils.isArray(context)) {
 		        for (var j = context.length; i < j; i++) {
 		          if (i in context) {
-		            execIteration(i, i, i === context.length - 1);
+		            execIteration(i, i, i === context.length - 1, context[i]);
 		          }
 		        }
 		      } else if (typeof Symbol === 'function' && context[Symbol.iterator]) {
-		        var newContext = [];
 		        var iterator = context[Symbol.iterator]();
-		        for (var it = iterator.next(); !it.done; it = iterator.next()) {
-		          newContext.push(it.value);
-		        }
-		        context = newContext;
-		        for (var j = context.length; i < j; i++) {
-		          execIteration(i, i, i === context.length - 1);
+		        var current = iterator.next();
+		        while (!current.done) {
+		          var next = iterator.next();
+		          try {
+		            execIteration(i, i, next.done, current.value);
+		          } catch (e) {
+		            if (!next.done) {
+		              closeIterator(iterator);
+		            }
+		            throw e;
+		          }
+		          current = next;
+		          i++;
 		        }
 		      } else {
 		        (function () {
@@ -31551,13 +32665,13 @@ function requireEach () {
 		            // the last iteration without have to scan the object twice and create
 		            // an itermediate keys array.
 		            if (priorKey !== undefined) {
-		              execIteration(priorKey, i - 1);
+		              execIteration(priorKey, i - 1, false, context[priorKey]);
 		            }
 		            priorKey = key;
 		            i++;
 		          });
 		          if (priorKey !== undefined) {
-		            execIteration(priorKey, i - 1, true);
+		            execIteration(priorKey, i - 1, true, context[priorKey]);
 		          }
 		        })();
 		      }
@@ -31986,6 +33100,7 @@ function requireProtoAccess () {
 	protoAccess.__esModule = true;
 	protoAccess.createProtoAccessControl = createProtoAccessControl;
 	protoAccess.resultIsAllowed = resultIsAllowed;
+	protoAccess.isPrototypeConstructor = isPrototypeConstructor;
 	protoAccess.resetLoggedProperties = resetLoggedProperties;
 	// istanbul ignore next
 
@@ -32033,6 +33148,25 @@ function requireProtoAccess () {
 	  } else {
 	    return checkWhiteList(protoAccessControl.properties, propertyName);
 	  }
+	}
+
+	/**
+	 * Detect a prototype object's own "constructor" back-reference, e.g.
+	 * `Function.prototype.constructor === Function`. Because "constructor" is an
+	 * "own" property of such objects, it would otherwise bypass the prototype-access
+	 * checks and expose dangerous constructors (allowing arbitrary code execution).
+	 *
+	 * Only functions can be constructors, so other values are never treated as one
+	 * and their `prototype` is never read.
+	 *
+	 * @param {*} parent the object the property is being read from
+	 * @param {string} propertyName the property being looked up
+	 * @param {*} result the already-resolved value of `parent[propertyName]`
+	 * @returns {boolean} true if the lookup resolves `parent`'s own constructor
+	 */
+
+	function isPrototypeConstructor(parent, propertyName, result) {
+	  return propertyName === 'constructor' && typeof result === 'function' && parent === result.prototype;
 	}
 
 	function checkWhiteList(protoAccessControlForType, propertyName) {
@@ -32090,7 +33224,7 @@ function requireBase$1 () {
 
 	var _internalProtoAccess = requireProtoAccess();
 
-	var VERSION = '4.7.9';
+	var VERSION = '4.7.10';
 	base$1.VERSION = VERSION;
 	var COMPILER_REVISION = 8;
 	base$1.COMPILER_REVISION = COMPILER_REVISION;
@@ -32327,7 +33461,19 @@ function requireRuntime () {
 
 	    var result = env.VM.invokePartial.call(this, partial, context, options);
 
+	    // An empty result normally means the partial is template source that still
+	    // has to be compiled. A function partial has already been invoked, so an
+	    // empty result from it is a bug in that partial.
+	    if (result == null && Utils.isFunction(partial)) {
+	      throw new _exception2['default']('The partial ' + options.name + ' returned no output: partials must return a string');
+	    }
+
 	    if (result == null && env.compile) {
+	      // Only template source registered as a partial may be compiled here.
+	      // Anything else (e.g. an AST-shaped object) must not become code.
+	      if (typeof partial !== 'string') {
+	        throw new _exception2['default']('The partial ' + options.name + ' could not be compiled: partials must be strings or functions returning strings');
+	      }
 	      options.partials[options.name] = env.compile(partial, templateSpec.compilerOptions, env);
 	      result = options.partials[options.name](context, options);
 	    }
@@ -32364,7 +33510,12 @@ function requireRuntime () {
 	      if (result == null) {
 	        return result;
 	      }
-	      if (Object.prototype.hasOwnProperty.call(parent, propertyName)) {
+	      // Own properties are trusted context data and returned as-is, except for
+	      // a prototype's own "constructor" back-reference (e.g.
+	      // Function.prototype.constructor === Function): that must still pass the
+	      // prototype-access deny list, otherwise the Function constructor becomes
+	      // reachable and arbitrary code can be executed.
+	      if (Object.prototype.hasOwnProperty.call(parent, propertyName) && !_internalProtoAccess.isPrototypeConstructor(parent, propertyName, result)) {
 	        return result;
 	      }
 
@@ -32532,8 +33683,11 @@ function requireRuntime () {
 	    } else {
 	      partial = lookupOwnProperty(options.partials, options.name);
 	    }
-	  } else if (!partial.call && !options.name) {
-	    // This is a dynamic partial that returned a string
+	  } else if (typeof partial !== 'function' && !options.name) {
+	    // This is a dynamic partial that returned a name rather than a compiled
+	    // partial. Only functions are accepted as partials here; any other value
+	    // (including an object with a "call" property) is treated as a name, so
+	    // that context data can never be compiled as a template.
 	    options.name = partial;
 	    partial = lookupOwnProperty(options.partials, partial);
 	  }
@@ -33473,6 +34627,21 @@ var whitespaceControl = {exports: {}};
 
 var visitor = {exports: {}};
 
+var nodeTypes = {};
+
+var hasRequiredNodeTypes;
+
+function requireNodeTypes () {
+	if (hasRequiredNodeTypes) return nodeTypes;
+	hasRequiredNodeTypes = 1;
+
+	nodeTypes.__esModule = true;
+	var NODE_TYPES = ['Program', 'BlockStatement', 'DecoratorBlock', 'PartialStatement', 'PartialBlockStatement', 'Decorator', 'MustacheStatement', 'ContentStatement', 'CommentStatement', 'SubExpression', 'PathExpression', 'StringLiteral', 'NumberLiteral', 'BooleanLiteral', 'UndefinedLiteral', 'NullLiteral', 'Hash', 'HashPair'];
+	nodeTypes.NODE_TYPES = NODE_TYPES;
+	
+	return nodeTypes;
+}
+
 var hasRequiredVisitor;
 
 function requireVisitor () {
@@ -33489,8 +34658,32 @@ function requireVisitor () {
 
 		var _exception2 = _interopRequireDefault(_exception);
 
+		var _utils = requireUtils$1();
+
+		var _nodeTypes = requireNodeTypes();
+
 		function Visitor() {
 		  this.parents = [];
+		}
+
+		/**
+		 * Whether a visitor may dispatch on a node type.
+		 *
+		 * A type is dispatchable if the parser produces it, or if the visitor
+		 * (typically a subclass) defines a handler for it that is not a method of
+		 * Visitor itself. `in` is used for the latter so that accept, acceptKey and
+		 * everything inherited from Object.prototype (constructor, __proto__, ...)
+		 * can never be reached through a crafted `type`.
+		 *
+		 * Subclasses that visit untrusted ASTs, such as WhitespaceControl, must
+		 * therefore define nothing but node handlers as function properties.
+		 *
+		 * @param {Visitor} visitor the visitor that would handle the node
+		 * @param {*} type the untrusted `type` of the node
+		 * @returns {boolean} true if the visitor may call its `type` method
+		 */
+		function isDispatchable(visitor, type) {
+		  return _utils.indexOf(_nodeTypes.NODE_TYPES, type) !== -1 || !(type in Visitor.prototype) && typeof visitor[type] === 'function';
 		}
 
 		Visitor.prototype = {
@@ -33501,9 +34694,7 @@ function requireVisitor () {
 		  acceptKey: function acceptKey(node, name) {
 		    var value = this.accept(node[name]);
 		    if (this.mutating) {
-		      // Hacky sanity check: This may have a few false positives for type for the helper
-		      // methods but will generally do the right thing without a lot of overhead.
-		      if (value && !Visitor.prototype[value.type]) {
+		      if (value && !isDispatchable(this, value.type)) {
 		        throw new _exception2['default']('Unexpected node type "' + value.type + '" found when accepting ' + name + ' on ' + node.type);
 		      }
 		      node[name] = value;
@@ -33539,8 +34730,9 @@ function requireVisitor () {
 		      return;
 		    }
 
-		    /* istanbul ignore next: Sanity code */
-		    if (!this[object.type]) {
+		    // Dispatching on an unknown type could call an arbitrary method of the
+		    // visitor (e.g. `accept` itself) with an untrusted AST node.
+		    if (!isDispatchable(this, object.type) || !this[object.type]) {
 		      throw new _exception2['default']('Unknown type: ' + object.type, object);
 		    }
 
@@ -33680,7 +34872,7 @@ function requireWhitespaceControl () {
 		        // If we are on a standalone node, save the indent info for partials
 		        if (current.type === 'PartialStatement') {
 		          // Pull out the whitespace from the final line
-		          current.indent = /([ \t]+$)/.exec(body[i - 1].original)[1];
+		          current.indent = /(?:^|[^ \t])([ \t]+)$/.exec(body[i - 1].original)[1];
 		        }
 		      }
 		    }
@@ -33788,7 +34980,9 @@ function requireWhitespaceControl () {
 		  }
 
 		  if (prev.type === 'ContentStatement') {
-		    return (sibling || !isRoot ? /\r?\n\s*?$/ : /(^|\r?\n)\s*?$/).test(prev.original);
+		    // Matches when the trailing whitespace contains a newline (or, for the
+		    // root's first node, is the whole string). See omitLeft for the anchoring.
+		    return (sibling || !isRoot ? /(?:^|\S)[^\S\n]*\n\s*$/ : /^\s*$|(?:^|\S)[^\S\n]*\n\s*$/).test(prev.original);
 		  }
 		}
 		function isNextWhitespace(body, i, isRoot) {
@@ -33840,7 +35034,10 @@ function requireWhitespaceControl () {
 
 		  // We omit the last node if it's whitespace only and not preceded by a non-content node.
 		  var original = current.value;
-		  current.value = current.value.replace(multiple ? /\s+$/ : /[ \t]+$/, '');
+		  // The match must start after a non-whitespace character (or at the start):
+		  // a plain /\s+$/ is retried at every position of a whitespace run, which
+		  // takes quadratic time on long runs.
+		  current.value = current.value.replace(multiple ? /(^|\S)\s+$/ : /(^|[^ \t])[ \t]+$/, '$1');
 		  current.leftStripped = current.value !== original;
 		  return current.leftStripped;
 		}
@@ -34118,10 +35315,6 @@ function requireBase () {
 
 	var Helpers = _interopRequireWildcard(_helpers);
 
-	var _exception = requireException();
-
-	var _exception2 = _interopRequireDefault(_exception);
-
 	var _utils = requireUtils$1();
 
 	base.parser = _parser2['default'];
@@ -34132,9 +35325,6 @@ function requireBase () {
 	function parseWithoutProcessing(input, options) {
 	  // Just return if an already-compiled AST was passed in.
 	  if (input.type === 'Program') {
-	    // When a pre-parsed AST is passed in, validate all node values to prevent
-	    // code injection via type-confused literals.
-	    validateInputAst(input);
 	    return input;
 	  }
 
@@ -34155,58 +35345,6 @@ function requireBase () {
 	  var strip = new _whitespaceControl2['default'](options);
 
 	  return strip.accept(ast);
-	}
-
-	function validateInputAst(ast) {
-	  validateAstNode(ast);
-	}
-
-	function validateAstNode(node) {
-	  if (node == null) {
-	    return;
-	  }
-
-	  if (Array.isArray(node)) {
-	    node.forEach(validateAstNode);
-	    return;
-	  }
-
-	  if (typeof node !== 'object') {
-	    return;
-	  }
-
-	  if (node.type === 'PathExpression') {
-	    if (!isValidDepth(node.depth)) {
-	      throw new _exception2['default']('Invalid AST: PathExpression.depth must be an integer');
-	    }
-	    if (!Array.isArray(node.parts)) {
-	      throw new _exception2['default']('Invalid AST: PathExpression.parts must be an array');
-	    }
-	    for (var i = 0; i < node.parts.length; i++) {
-	      if (typeof node.parts[i] !== 'string') {
-	        throw new _exception2['default']('Invalid AST: PathExpression.parts must only contain strings');
-	      }
-	    }
-	  } else if (node.type === 'NumberLiteral') {
-	    if (typeof node.value !== 'number' || !isFinite(node.value)) {
-	      throw new _exception2['default']('Invalid AST: NumberLiteral.value must be a number');
-	    }
-	  } else if (node.type === 'BooleanLiteral') {
-	    if (typeof node.value !== 'boolean') {
-	      throw new _exception2['default']('Invalid AST: BooleanLiteral.value must be a boolean');
-	    }
-	  }
-
-	  Object.keys(node).forEach(function (propertyName) {
-	    if (propertyName === 'loc') {
-	      return;
-	    }
-	    validateAstNode(node[propertyName]);
-	  });
-	}
-
-	function isValidDepth(depth) {
-	  return typeof depth === 'number' && isFinite(depth) && Math.floor(depth) === depth && depth >= 0;
 	}
 	
 	return base;
@@ -34239,6 +35377,8 @@ function requireCompiler () {
 	var _ast = requireAst();
 
 	var _ast2 = _interopRequireDefault(_ast);
+
+	var _nodeTypes = requireNodeTypes();
 
 	var slice = [].slice;
 
@@ -34319,8 +35459,8 @@ function requireCompiler () {
 	  },
 
 	  accept: function accept(node) {
-	    /* istanbul ignore next: Sanity code */
-	    if (!this[node.type]) {
+	    // Dispatching on an unknown type could call an arbitrary Compiler method.
+	    if (_utils.indexOf(_nodeTypes.NODE_TYPES, node.type) === -1 || !this[node.type]) {
 	      throw new _exception2['default']('Unknown type: ' + node.type, node);
 	    }
 
@@ -34331,6 +35471,7 @@ function requireCompiler () {
 	  },
 
 	  Program: function Program(program) {
+	    validateBlockParams(program);
 	    this.options.blockParams.unshift(program.blockParams);
 
 	    var body = program.body,
@@ -34446,6 +35587,9 @@ function requireCompiler () {
 	  },
 
 	  ContentStatement: function ContentStatement(content) {
+	    if (content.value != null && typeof content.value !== 'string') {
+	      throw invalidAst(content, 'value must be a string');
+	    }
 	    if (content.value) {
 	      this.opcode('appendContent', content.value);
 	    }
@@ -34470,7 +35614,7 @@ function requireCompiler () {
 	        name = path.parts[0],
 	        isBlock = program != null || inverse != null;
 
-	    this.opcode('getContext', path.depth);
+	    this.opcode('getContext', validateDepth(path));
 
 	    this.opcode('pushProgram', program);
 	    this.opcode('pushProgram', inverse);
@@ -34507,35 +35651,43 @@ function requireCompiler () {
 	  },
 
 	  PathExpression: function PathExpression(path) {
-	    this.addDepth(path.depth);
-	    this.opcode('getContext', path.depth);
+	    // Validate AST values at the compiler boundary: javascript-compiler.js
+	    // trusts all opcode arguments to be safe.
+	    var depth = validateDepth(path);
+	    var parts = validateParts(path);
 
-	    var name = path.parts[0],
+	    this.addDepth(depth);
+	    this.opcode('getContext', depth);
+
+	    var name = parts[0],
 	        scoped = _ast2['default'].helpers.scopedId(path),
-	        blockParamId = !path.depth && !scoped && this.blockParamIndex(name);
+	        blockParamId = !depth && !scoped && this.blockParamIndex(name);
 
 	    if (blockParamId) {
-	      this.opcode('lookupBlockParam', blockParamId, path.parts);
+	      this.opcode('lookupBlockParam', blockParamId, parts);
 	    } else if (!name) {
 	      // Context reference, i.e. `{{foo .}}` or `{{foo ..}}`
 	      this.opcode('pushContext');
 	    } else if (path.data) {
 	      this.options.data = true;
-	      this.opcode('lookupData', path.depth, path.parts, path.strict);
+	      this.opcode('lookupData', depth, parts, path.strict);
 	    } else {
-	      this.opcode('lookupOnContext', path.parts, path.falsy, path.strict, scoped);
+	      this.opcode('lookupOnContext', parts, path.falsy, path.strict, scoped);
 	    }
 	  },
 
 	  StringLiteral: function StringLiteral(string) {
+	    validateLiteral(string);
 	    this.opcode('pushString', string.value);
 	  },
 
 	  NumberLiteral: function NumberLiteral(number) {
+	    validateLiteral(number);
 	    this.opcode('pushLiteral', number.value);
 	  },
 
 	  BooleanLiteral: function BooleanLiteral(bool) {
+	    validateLiteral(bool);
 	    this.opcode('pushLiteral', bool.value);
 	  },
 
@@ -34550,7 +35702,17 @@ function requireCompiler () {
 	  Hash: function Hash(hash) {
 	    var pairs = hash.pairs,
 	        i = 0,
-	        l = pairs.length;
+	        l = undefined;
+
+	    if (!_utils.isArray(pairs)) {
+	      throw invalidAst(hash, 'pairs must be an array');
+	    }
+	    l = pairs.length;
+	    for (var j = 0; j < l; j++) {
+	      if (!pairs[j] || typeof pairs[j].key !== 'string') {
+	        throw invalidAst(hash, 'pair keys must be strings');
+	      }
+	    }
 
 	    this.opcode('pushHash');
 
@@ -34581,6 +35743,9 @@ function requireCompiler () {
 	  },
 
 	  classifySexpr: function classifySexpr(sexpr) {
+	    // The first part is used as a helper name below, e.g. for known helpers,
+	    // before the PathExpression handler gets to validate the parts.
+	    validateParts(sexpr.path);
 	    var isSimple = _ast2['default'].helpers.simpleId(sexpr.path);
 
 	    var isBlockParam = isSimple && !!this.blockParamIndex(sexpr.path.parts[0]);
@@ -34622,17 +35787,26 @@ function requireCompiler () {
 	  },
 
 	  pushParam: function pushParam(val) {
+	    // Literal params are not visited by their node handlers in stringParams
+	    // mode, so their values must be validated here as well.
+	    validateLiteral(val);
 	    var value = val.value != null ? val.value : val.original || '';
+	    var depth = validateDepth(val);
 
 	    if (this.stringParams) {
+	      // pushStringParam emits non-string values as raw JavaScript literals.
+	      // Literal values are validated above, but `original` is not, so
+	      // anything that is not a number or boolean is stringified.
+	      if (typeof value !== 'number' && typeof value !== 'boolean') {
+	        value = String(value);
+	      }
 	      if (value.replace) {
 	        value = value.replace(/^(\.?\.\/)*/g, '').replace(/\//g, '.');
 	      }
-
-	      if (val.depth) {
-	        this.addDepth(val.depth);
+	      if (depth) {
+	        this.addDepth(depth);
 	      }
-	      this.opcode('getContext', val.depth || 0);
+	      this.opcode('getContext', depth);
 	      this.opcode('pushStringParam', value, val.type);
 
 	      if (val.type === 'SubExpression') {
@@ -34643,8 +35817,10 @@ function requireCompiler () {
 	    } else {
 	      if (this.trackIds) {
 	        var blockParamIndex = undefined;
-	        if (val.parts && !_ast2['default'].helpers.scopedId(val) && !val.depth) {
-	          blockParamIndex = this.blockParamIndex(val.parts[0]);
+	        if (val.parts && !_ast2['default'].helpers.scopedId(val) && !depth) {
+	          // The parts are read here before the PathExpression handler,
+	          // invoked by accept() below, gets to validate them.
+	          blockParamIndex = this.blockParamIndex(validateParts(val)[0]);
 	        }
 	        if (blockParamIndex) {
 	          var blockParamChild = val.parts.slice(1).join('.');
@@ -34753,6 +35929,111 @@ function requireCompiler () {
 	  return ret;
 	}
 
+	/**
+	 * Create the exception thrown for an AST node that fails validation.
+	 *
+	 * @param {Object} node the offending AST node; its `type` is included in the
+	 *   message and its `loc`, if present, in the error location
+	 * @param {string} message what is wrong with the node
+	 * @returns {Exception} the exception to throw
+	 */
+	function invalidAst(node, message) {
+	  return new _exception2['default']('Invalid AST: ' + node.type + ' ' + message, node);
+	}
+
+	/**
+	 * Validate the `depth` of a path or param node.
+	 *
+	 * A missing depth is treated as 0, because ASTs built by hand or by other
+	 * tools commonly omit it. Any depth that is present must be a non-negative
+	 * integer, since it is written into the generated code.
+	 *
+	 * @param {Object} node the AST node whose `depth` is validated
+	 * @returns {number} the validated depth, or 0 if the node has none
+	 * @throws {Exception} if the depth is present but not a non-negative integer
+	 */
+	function validateDepth(node) {
+	  var depth = node.depth;
+	  if (depth == null) {
+	    return 0;
+	  }
+	  if (typeof depth !== 'number' || !isFinite(depth) || Math.floor(depth) !== depth || depth < 0) {
+	    throw invalidAst(node, 'depth must be a non-negative integer');
+	  }
+	  return depth;
+	}
+
+	/**
+	 * Validate the `value` of a StringLiteral, NumberLiteral or BooleanLiteral.
+	 *
+	 * Literal values are written into the generated code, so they must have
+	 * exactly the type their node promises. Nodes of any other type pass through
+	 * unchanged.
+	 *
+	 * Numbers need not be finite: the parser produces Infinity for very long
+	 * number literals, and Infinity and NaN are emitted as the read-only globals
+	 * of the same name.
+	 *
+	 * @param {Object} node the AST node to validate
+	 * @throws {Exception} if the value does not match the literal type
+	 */
+	function validateLiteral(node) {
+	  var value = node.value;
+	  if (node.type === 'StringLiteral' && typeof value !== 'string') {
+	    throw invalidAst(node, 'value must be a string');
+	  } else if (node.type === 'NumberLiteral' && typeof value !== 'number') {
+	    throw invalidAst(node, 'value must be a number');
+	  } else if (node.type === 'BooleanLiteral' && typeof value !== 'boolean') {
+	    throw invalidAst(node, 'value must be a boolean');
+	  }
+	}
+
+	/**
+	 * Validate that a node property is an array containing only strings.
+	 *
+	 * @param {Object} node the AST node the property belongs to, for the error
+	 * @param {*} value the property value to validate
+	 * @param {string} name the property name, used in the error message
+	 * @returns {string[]} the validated array
+	 * @throws {Exception} if the value is not an array or contains non-strings
+	 */
+	function validateStringArray(node, value, name) {
+	  if (!_utils.isArray(value)) {
+	    throw invalidAst(node, name + ' must be an array');
+	  }
+	  for (var i = 0; i < value.length; i++) {
+	    if (typeof value[i] !== 'string') {
+	      throw invalidAst(node, name + ' must only contain strings');
+	    }
+	  }
+	  return value;
+	}
+
+	/**
+	 * Validate the `parts` of a PathExpression node.
+	 *
+	 * @param {Object} path the PathExpression node
+	 * @returns {string[]} the validated parts
+	 * @throws {Exception} if `parts` is not an array of strings
+	 */
+	function validateParts(path) {
+	  return validateStringArray(path, path.parts, 'parts');
+	}
+
+	/**
+	 * Validate the optional `blockParams` of a Program node. Its length is
+	 * written into the generated code, so it must be an array of strings when
+	 * present.
+	 *
+	 * @param {Object} program the Program node
+	 * @throws {Exception} if `blockParams` is present and not an array of strings
+	 */
+	function validateBlockParams(program) {
+	  if (program.blockParams != null) {
+	    validateStringArray(program, program.blockParams, 'blockParams');
+	  }
+	}
+
 	function argEquals(a, b) {
 	  if (a === b) {
 	    return true;
@@ -34789,7 +36070,7 @@ function requireCompiler () {
 
 var javascriptCompiler = {exports: {}};
 
-var codeGen = {exports: {}};
+var codeGen = {};
 
 var sourceMap = {};
 
@@ -38032,13 +39313,66 @@ function requireSourceMap () {
 var hasRequiredCodeGen;
 
 function requireCodeGen () {
-	if (hasRequiredCodeGen) return codeGen.exports;
+	if (hasRequiredCodeGen) return codeGen;
 	hasRequiredCodeGen = 1;
-	(function (module, exports) {
+	(function (exports) {
 
 		exports.__esModule = true;
+		exports.safeJsonLiteral = safeJsonLiteral;
 
 		var _utils = requireUtils$1();
+
+		// Matches any character that quotedString may have to escape: quotes,
+		// backslashes, control characters, line separators, surrogates and "<". Most
+		// strings, e.g. lookup names, contain none of them and can skip the escaping.
+		// eslint-disable-next-line no-control-regex
+		var NEEDS_ESCAPING = /[\x00-\x1f\\"\u2028\u2029<\ud800-\udfff]/;
+
+		// Per HTML "Restrictions for contents of script elements": "<!--", "<script"
+		// and "</script" can end or change the parsing of an enclosing <script>
+		// element.
+		var SCRIPT_DELIMITERS = /<(?=!--|\/?script)/gi;
+
+		/**
+		 * Escape the "<" of every sequence that could end or change the parsing of
+		 * an enclosing <script> element.
+		 *
+		 * Only pass JavaScript or JSON code in which "<" can only occur inside string
+		 * literals, where "\u003C" has the same value.
+		 *
+		 * @param {string} code the code to escape
+		 * @returns {string} the escaped code
+		 */
+		function escapeScriptDelimiters(code) {
+		  return code.replace(SCRIPT_DELIMITERS, '\\u003C');
+		}
+
+		/**
+		 * Escape a UTF-16 surrogate code unit as a "\uXXXX" escape sequence.
+		 *
+		 * @param {string} surrogate a single surrogate code unit
+		 * @returns {string} the escape sequence
+		 */
+		function escapeSurrogate(surrogate) {
+		  return '\\u' + surrogate.charCodeAt(0).toString(16);
+		}
+
+		/**
+		 * Convert a value to a JSON literal that is safe to write into generated
+		 * code: valid in ES5, where line and paragraph separators end string literals,
+		 * encodable as UTF-8 on every engine, and safe inside an enclosing <script>
+		 * element.
+		 *
+		 * @param {*} value the value to convert
+		 * @returns {string} the JavaScript literal
+		 */
+
+		function safeJsonLiteral(value) {
+		  return escapeScriptDelimiters(JSON.stringify(value).replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
+		  // Engines before ES2019 leave lone surrogates unescaped, and those cannot
+		  // be encoded as UTF-8. Escaping paired ones as well keeps the value.
+		  .replace(/[\ud800-\udfff]/g, escapeSurrogate));
+		}
 
 		var SourceNode = undefined;
 
@@ -38151,8 +39485,16 @@ function requireCodeGen () {
 		  },
 
 		  quotedString: function quotedString(str) {
-		    return '"' + (str + '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\u2028/g, '\\u2028') // Per Ecma-262 7.3 + 7.8.4
-		    .replace(/\u2029/g, '\\u2029') + '"';
+		    str = str + '';
+		    // Fast path: quotedString runs for every lookup name and content string,
+		    // and the chain of replacements below is much slower than a single test.
+		    if (!NEEDS_ESCAPING.test(str)) {
+		      return '"' + str + '"';
+		    }
+
+		    // JSON.stringify escapes quotes, backslashes and control characters;
+		    // safeJsonLiteral adds line separators, surrogates and script delimiters.
+		    return safeJsonLiteral(str);
 		  },
 
 		  objectLiteral: function objectLiteral(obj) {
@@ -38199,10 +39541,9 @@ function requireCodeGen () {
 		};
 
 		exports['default'] = CodeGen;
-		module.exports = exports['default'];
 		
-	} (codeGen, codeGen.exports));
-	return codeGen.exports;
+	} (codeGen));
+	return codeGen;
 }
 
 var hasRequiredJavascriptCompiler;
@@ -38242,7 +39583,7 @@ function requireJavascriptCompiler () {
 		    return this.internalNameLookup(parent, name);
 		  },
 		  depthedLookup: function depthedLookup(name) {
-		    return [this.aliasable('container.lookup'), '(depths, ', JSON.stringify(name), ')'];
+		    return [this.aliasable('container.lookup'), '(depths, ', this.quotedString(name), ')'];
 		  },
 
 		  compilerInfo: function compilerInfo() {
@@ -38277,7 +39618,7 @@ function requireJavascriptCompiler () {
 		  // END PUBLIC API
 		  internalNameLookup: function internalNameLookup(parent, name) {
 		    this.lookupPropertyFunctionIsUsed = true;
-		    return ['lookupProperty(', parent, ',', JSON.stringify(name), ')'];
+		    return ['lookupProperty(', parent, ',', this.quotedString(name), ')'];
 		  },
 
 		  lookupPropertyFunctionIsUsed: false,
@@ -38952,7 +40293,7 @@ function requireJavascriptCompiler () {
 		    }
 
 		    if (indent) {
-		      options.indent = JSON.stringify(indent);
+		      options.indent = this.quotedString(indent);
 		    }
 		    options.helpers = 'helpers';
 		    options.partials = 'partials';
@@ -39008,7 +40349,7 @@ function requireJavascriptCompiler () {
 
 		  pushId: function pushId(type, name, child) {
 		    if (type === 'BlockParam') {
-		      this.pushStackLiteral('blockParams[' + name[0] + '].path[' + name[1] + ']' + (child ? ' + ' + JSON.stringify('.' + child) : ''));
+		      this.pushStackLiteral('blockParams[' + name[0] + '].path[' + name[1] + ']' + (child ? ' + ' + this.quotedString('.' + child) : ''));
 		    } else if (type === 'PathExpression') {
 		      this.pushString(name);
 		    } else if (type === 'SubExpression') {
@@ -39323,7 +40664,7 @@ function requireJavascriptCompiler () {
 
 		  setupHelperArgs: function setupHelperArgs(helper, paramSize, params, useRegister) {
 		    var options = this.setupParams(helper, paramSize, params);
-		    options.loc = JSON.stringify(this.source.currentLocation);
+		    options.loc = locationLiteral(this);
 		    options = this.objectLiteral(options);
 		    if (useRegister) {
 		      this.useRegister('options');
@@ -39355,6 +40696,22 @@ function requireJavascriptCompiler () {
 		  return !JavaScriptCompiler.RESERVED_WORDS[name] && /^[a-zA-Z_$][0-9a-zA-Z_$]*$/.test(name);
 		};
 
+		/**
+		 * The compiler's current source location as a JavaScript literal.
+		 *
+		 * Hand-built ASTs may omit `loc`; emitting the literal `undefined` then
+		 * keeps the generated code valid and drops the key from object literals.
+		 * The location's `source` is the `srcName` option, so it is escaped like
+		 * every other string in the generated code.
+		 *
+		 * @param {JavaScriptCompiler} compiler the compiler whose location is emitted
+		 * @returns {string} a JSON object literal, or the string "undefined"
+		 */
+		function locationLiteral(compiler) {
+		  var loc = compiler.source.currentLocation;
+		  return loc ? _codeGen.safeJsonLiteral(loc) : 'undefined';
+		}
+
 		function strictLookup(requireTerminal, compiler, parts, startPartIndex, type) {
 		  var stack = compiler.popStack(),
 		      len = parts.length;
@@ -39367,7 +40724,7 @@ function requireJavascriptCompiler () {
 		  }
 
 		  if (requireTerminal) {
-		    return [compiler.aliasable('container.strict'), '(', stack, ', ', compiler.quotedString(parts[len]), ', ', JSON.stringify(compiler.source.currentLocation), ' )'];
+		    return [compiler.aliasable('container.strict'), '(', stack, ', ', compiler.quotedString(parts[len]), ', ', locationLiteral(compiler), ' )'];
 		  } else {
 		    return stack;
 		  }
@@ -39729,7 +41086,8 @@ const SECTION_ORDER = [
  */
 const COMMIT_PARTIAL = `* {{#if scope}}*({{scope}})* {{/if}}{{linkIssues subject}}` +
     `{{#if refs}} — {{#each refs}}{{action}} [{{displayId}}]({{url}}){{#unless @last}}, {{/unless}}{{/each}}{{/if}}` +
-    `{{#if commitUrl}} ([{{shortHash}}]({{commitUrl}})){{/if}}\n`;
+    `{{#if commitUrl}} ([{{shortHash}}]({{commitUrl}})){{/if}}\n` +
+    `{{#if description}}{{{description}}}\n{{/if}}`;
 /**
  * Main Handlebars template for the full changelog section.
  * Structure:
@@ -39741,7 +41099,7 @@ const COMMIT_PARTIAL = `* {{#if scope}}*({{scope}})* {{/if}}{{linkIssues subject
  */
 const MAIN_TEMPLATE = `## {{{version}}}\n` +
     `{{#if hasBreaking}}` +
-    `\n### ⚠ BREAKING CHANGES\n\n` +
+    `\n\n### ⚠ BREAKING CHANGES\n\n` +
     `{{#each breakingChanges}}* {{{text}}}{{#if commitUrl}} ([{{shortHash}}]({{commitUrl}})){{/if}}\n{{/each}}` +
     `{{/if}}` +
     `{{#each sections}}` +
@@ -39788,17 +41146,15 @@ class HandlebarsChangelogWriter extends ChangelogWriter {
         // Bucket by section title → scope (null = unscoped) → CommitView[]
         const typeBuckets = new Map();
         for (const commit of commits) {
-            const match = commit.title.match(/^(\w+)(?:\(([^)]+)\))?(!)?:\s*(.+)$/);
-            if (!match)
+            const parsed = parseCommit(commit);
+            if (!parsed)
                 continue;
-            const type = match[1];
-            const scope = match[2] ?? null;
-            const breaking = !!match[3];
-            const subject = match[4];
-            const bcFooterMatch = /^BREAKING CHANGE:\s*(.+)$/m.exec(commit.message || '');
-            if (breaking || bcFooterMatch) {
-                const bcText = bcFooterMatch ? bcFooterMatch[1] : subject;
-                const bcEntry = { text: bcText };
+            const { type, subject } = parsed;
+            const scope = parsed.scope ?? null;
+            for (const text of parsed.breakingNotes.length ? parsed.breakingNotes : parsed.breaking ? [subject] : []) {
+                const bcEntry = {
+                    text: text.replace(/\n(?!$)/g, '\n  '),
+                };
                 if (context.repoUrl && context.commitPath && commit.sha) {
                     bcEntry.commitUrl = `${context.repoUrl}${context.commitPath}/${commit.sha}`;
                     bcEntry.shortHash = commit.sha.substring(0, 7);
@@ -39809,13 +41165,7 @@ class HandlebarsChangelogWriter extends ChangelogWriter {
             if (!sectionTitle)
                 continue;
             // Extract git-trailer style refs from the commit body
-            const rawRefs = [];
-            const fullMessage = commit.message || commit.title;
-            const refRe = /^(refs?|fixes?|closes?|resolves?):\s*#?(\S+)/gim;
-            let refMatch;
-            while ((refMatch = refRe.exec(fullMessage)) !== null) {
-                rawRefs.push({ action: refMatch[1].toLowerCase(), id: refMatch[2] });
-            }
+            const rawRefs = parsed.references;
             // Render footer refs as hyperlinks
             let refs;
             if (rawRefs.length > 0 && context.issueUrlTemplate) {
@@ -39834,6 +41184,9 @@ class HandlebarsChangelogWriter extends ChangelogWriter {
             }
             const commitView = {
                 subject,
+                description: context.includeDescription && parsed.description
+                    ? '\n' + parsed.description.split('\n').map(line => line ? `  ${line}` : '').join('\n')
+                    : undefined,
                 scope: scope ?? undefined,
                 refs,
                 shortHash,
@@ -40437,6 +41790,8 @@ class Alias extends NodeBase {
      * instance of the `source` anchor before this node.
      */
     resolve(doc, ctx) {
+        if (ctx?.maxAliasCount === 0)
+            throw new ReferenceError('Alias resolution is disabled');
         let nodes;
         if (ctx?.aliasResolveCache) {
             nodes = ctx.aliasResolveCache;
@@ -40459,38 +41814,40 @@ class Alias extends NodeBase {
             if (node.anchor === this.source)
                 found = node;
         }
+        if (found && ctx) {
+            const { anchors, doc, maxAliasCount } = ctx;
+            let data = anchors.get(found);
+            if (!data) {
+                // Resolve anchors for Node.prototype.toJS()
+                toJS(found, null, ctx);
+                data = anchors.get(found);
+            }
+            /* istanbul ignore if */
+            if (data?.res === undefined) {
+                const msg = 'This should not happen: Alias anchor was not resolved?';
+                throw new ReferenceError(msg);
+            }
+            if (maxAliasCount >= 0) {
+                data.count += 1;
+                if (data.aliasCount === 0)
+                    data.aliasCount = getAliasCount(doc, found, anchors);
+                if (data.count * data.aliasCount > maxAliasCount) {
+                    const msg = 'Excessive alias count indicates a resource exhaustion attack';
+                    throw new ReferenceError(msg);
+                }
+            }
+        }
         return found;
     }
     toJSON(_arg, ctx) {
         if (!ctx)
             return { source: this.source };
-        const { anchors, doc, maxAliasCount } = ctx;
-        const source = this.resolve(doc, ctx);
+        const source = this.resolve(ctx.doc, ctx);
         if (!source) {
             const msg = `Unresolved alias (the anchor must be set before the alias): ${this.source}`;
             throw new ReferenceError(msg);
         }
-        let data = anchors.get(source);
-        if (!data) {
-            // Resolve anchors for Node.prototype.toJS()
-            toJS(source, null, ctx);
-            data = anchors.get(source);
-        }
-        /* istanbul ignore if */
-        if (data?.res === undefined) {
-            const msg = 'This should not happen: Alias anchor was not resolved?';
-            throw new ReferenceError(msg);
-        }
-        if (maxAliasCount >= 0) {
-            data.count += 1;
-            if (data.aliasCount === 0)
-                data.aliasCount = getAliasCount(doc, source, anchors);
-            if (data.count * data.aliasCount > maxAliasCount) {
-                const msg = 'Excessive alias count indicates a resource exhaustion attack';
-                throw new ReferenceError(msg);
-            }
-        }
-        return data.res;
+        return ctx.anchors.get(source).res;
     }
     toString(ctx, _onComment, _onChompKeep) {
         const src = `*${this.source}`;
@@ -41567,18 +42924,18 @@ const isMergeKey = (ctx, key) => (merge$1.identify(key) ||
         merge$1.identify(key.value))) &&
     ctx?.doc.schema.tags.some(tag => tag.tag === merge$1.tag && tag.default);
 function addMergeToJSMap(ctx, map, value) {
-    value = ctx && isAlias(value) ? value.resolve(ctx.doc) : value;
-    if (isSeq(value))
-        for (const it of value.items)
+    const source = resolveAliasValue(ctx, value);
+    if (isSeq(source))
+        for (const it of source.items)
             mergeValue(ctx, map, it);
-    else if (Array.isArray(value))
-        for (const it of value)
+    else if (Array.isArray(source))
+        for (const it of source)
             mergeValue(ctx, map, it);
     else
-        mergeValue(ctx, map, value);
+        mergeValue(ctx, map, source);
 }
 function mergeValue(ctx, map, value) {
-    const source = ctx && isAlias(value) ? value.resolve(ctx.doc) : value;
+    const source = resolveAliasValue(ctx, value);
     if (!isMap(source))
         throw new Error('Merge sources must be maps or map aliases');
     const srcMap = source.toJSON(null, ctx, Map);
@@ -41600,6 +42957,9 @@ function mergeValue(ctx, map, value) {
         }
     }
     return map;
+}
+function resolveAliasValue(ctx, value) {
+    return ctx && isAlias(value) ? value.resolve(ctx.doc, ctx) : value;
 }
 
 function addPairToJSMap(ctx, map, { key, value }) {
@@ -42152,7 +43512,8 @@ function stringifyNumber({ format, minFractionDigits, tag, value }) {
     if (!format &&
         minFractionDigits &&
         (!tag || tag === 'tag:yaml.org,2002:float') &&
-        /^\d/.test(n)) {
+        /^-?\d/.test(n) &&
+        !n.includes('e')) {
         let i = n.indexOf('.');
         if (i < 0) {
             i = n.length;
@@ -44333,46 +45694,47 @@ function plainValue(source, onError) {
     }
     if (badChar)
         onError(0, 'BAD_SCALAR_START', `Plain value cannot start with ${badChar}`);
-    return foldLines(source);
+    return unfoldLines(source);
 }
 function singleQuotedValue(source, onError) {
     if (source[source.length - 1] !== "'" || source.length === 1)
         onError(source.length, 'MISSING_CHAR', "Missing closing 'quote");
-    return foldLines(source.slice(1, -1)).replace(/''/g, "'");
+    return unfoldLines(source.slice(1, -1)).replace(/''/g, "'");
 }
-function foldLines(source) {
-    /**
-     * The negative lookbehind here and in the `re` RegExp is to
-     * prevent causing a polynomial search time in certain cases.
-     *
-     * The try-catch is for Safari, which doesn't support this yet:
-     * https://caniuse.com/js-regexp-lookbehind
-     */
-    let first, line;
-    try {
-        first = new RegExp('(.*?)(?<![ \t])[ \t]*\r?\n', 'sy');
-        line = new RegExp('[ \t]*(.*?)(?:(?<![ \t])[ \t]*)?\r?\n', 'sy');
-    }
-    catch {
-        first = /(.*?)[ \t]*\r?\n/sy;
-        line = /[ \t]*(.*?)[ \t]*\r?\n/sy;
-    }
-    let match = first.exec(source);
+function unfoldLines(source) {
+    const line = /(.*?)\r?\n/sy;
+    let match = line.exec(source);
     if (!match)
         return source;
-    let res = match[1];
+    /**
+     * The negative lookbehinds in these RegExps are to
+     * prevent causing a polynomial search time in certain cases.
+     *
+     * The try-catch is for Safari < 16.4 and other old browsers:
+     * https://caniuse.com/js-regexp-lookbehind
+     */
+    let trimEnd, trimBoth;
+    try {
+        trimEnd = new RegExp('(?<![ \t])[ \t]+$');
+        trimBoth = new RegExp('^[ \t]+|(?<![ \t])[ \t]+$', 'g');
+    }
+    catch {
+        trimEnd = /[ \t]+$/;
+        trimBoth = /^[ \t]+|[ \t]+$/g;
+    }
+    let res = match[1].replace(trimEnd, '');
     let sep = ' ';
-    let pos = first.lastIndex;
-    line.lastIndex = pos;
+    let pos = line.lastIndex;
     while ((match = line.exec(source))) {
-        if (match[1] === '') {
+        const lm = match[1].replace(trimBoth, '');
+        if (lm === '') {
             if (sep === '\n')
                 res += sep;
             else
                 sep = '\n';
         }
         else {
-            res += sep + match[1];
+            res += sep + lm;
             sep = ' ';
         }
         pos = line.lastIndex;
@@ -44411,7 +45773,7 @@ function doubleQuotedValue(source, onError) {
                     next = source[++i + 1];
             }
             else if (next === 'x' || next === 'u' || next === 'U') {
-                const length = { x: 2, u: 4, U: 8 }[next];
+                const length = next === 'x' ? 2 : next === 'u' ? 4 : 8;
                 res += parseCharCode(source, i + 1, length, onError);
                 i += length;
             }
@@ -44481,12 +45843,14 @@ function parseCharCode(source, offset, length, onError) {
     const cc = source.substr(offset, length);
     const ok = cc.length === length && /^[0-9a-fA-F]+$/.test(cc);
     const code = ok ? parseInt(cc, 16) : NaN;
-    if (isNaN(code)) {
+    try {
+        return String.fromCodePoint(code);
+    }
+    catch {
         const raw = source.substr(offset - 2, length + 2);
         onError(offset - 2, 'BAD_DQ_ESCAPE', `Invalid escape sequence ${raw}`);
         return raw;
     }
-    return String.fromCodePoint(code);
 }
 
 function composeScalar(ctx, token, tagToken, onError) {
@@ -44821,8 +46185,10 @@ class Composer {
             }
         }
         if (afterDoc) {
-            Array.prototype.push.apply(doc.errors, this.errors);
-            Array.prototype.push.apply(doc.warnings, this.warnings);
+            for (let i = 0; i < this.errors.length; ++i)
+                doc.errors.push(this.errors[i]);
+            for (let i = 0; i < this.warnings.length; ++i)
+                doc.warnings.push(this.warnings[i]);
         }
         else {
             doc.errors = this.errors;
@@ -45320,7 +46686,7 @@ class Lexer {
             const n = (yield* this.pushCount(1)) + (yield* this.pushSpaces(true));
             this.indentNext = this.indentValue + 1;
             this.indentValue += n;
-            return yield* this.parseBlockStart();
+            return 'block-start';
         }
         return 'doc';
     }
@@ -45641,32 +47007,36 @@ class Lexer {
         return 0;
     }
     *pushIndicators() {
-        switch (this.charAt(0)) {
-            case '!':
-                return ((yield* this.pushTag()) +
-                    (yield* this.pushSpaces(true)) +
-                    (yield* this.pushIndicators()));
-            case '&':
-                return ((yield* this.pushUntil(isNotAnchorChar)) +
-                    (yield* this.pushSpaces(true)) +
-                    (yield* this.pushIndicators()));
-            case '-': // this is an error
-            case '?': // this is an error outside flow collections
-            case ':': {
-                const inFlow = this.flowLevel > 0;
-                const ch1 = this.charAt(1);
-                if (isEmpty(ch1) || (inFlow && flowIndicatorChars.has(ch1))) {
-                    if (!inFlow)
-                        this.indentNext = this.indentValue + 1;
-                    else if (this.flowKey)
-                        this.flowKey = false;
-                    return ((yield* this.pushCount(1)) +
-                        (yield* this.pushSpaces(true)) +
-                        (yield* this.pushIndicators()));
+        let n = 0;
+        loop: while (true) {
+            switch (this.charAt(0)) {
+                case '!':
+                    n += yield* this.pushTag();
+                    n += yield* this.pushSpaces(true);
+                    continue loop;
+                case '&':
+                    n += yield* this.pushUntil(isNotAnchorChar);
+                    n += yield* this.pushSpaces(true);
+                    continue loop;
+                case '-': // this is an error
+                case '?': // this is an error outside flow collections
+                case ':': {
+                    const inFlow = this.flowLevel > 0;
+                    const ch1 = this.charAt(1);
+                    if (isEmpty(ch1) || (inFlow && flowIndicatorChars.has(ch1))) {
+                        if (!inFlow)
+                            this.indentNext = this.indentValue + 1;
+                        else if (this.flowKey)
+                            this.flowKey = false;
+                        n += yield* this.pushCount(1);
+                        n += yield* this.pushSpaces(true);
+                        continue loop;
+                    }
                 }
             }
+            break loop;
         }
-        return 0;
+        return n;
     }
     *pushTag() {
         if (this.charAt(1) === '<') {
@@ -45828,6 +47198,14 @@ function getFirstKeyStartProps(prev) {
     }
     return prev.splice(i, prev.length);
 }
+function arrayPushArray(target, source) {
+    // May exhaust call stack with large `source` array
+    if (source.length < 1e5)
+        Array.prototype.push.apply(target, source);
+    else
+        for (let i = 0; i < source.length; ++i)
+            target.push(source[i]);
+}
 function fixFlowSeqItems(fc) {
     if (fc.start.type === 'flow-seq-start') {
         for (const it of fc.items) {
@@ -45840,12 +47218,12 @@ function fixFlowSeqItems(fc) {
                 delete it.key;
                 if (isFlowToken(it.value)) {
                     if (it.value.end)
-                        Array.prototype.push.apply(it.value.end, it.sep);
+                        arrayPushArray(it.value.end, it.sep);
                     else
                         it.value.end = it.sep;
                 }
                 else
-                    Array.prototype.push.apply(it.start, it.sep);
+                    arrayPushArray(it.start, it.sep);
                 delete it.sep;
             }
         }
@@ -46263,7 +47641,7 @@ class Parser {
                         const prev = map.items[map.items.length - 2];
                         const end = prev?.value?.end;
                         if (Array.isArray(end)) {
-                            Array.prototype.push.apply(end, it.start);
+                            arrayPushArray(end, it.start);
                             end.push(this.sourceToken);
                             map.items.pop();
                             return;
@@ -46478,7 +47856,7 @@ class Parser {
                         const prev = seq.items[seq.items.length - 2];
                         const end = prev?.value?.end;
                         if (Array.isArray(end)) {
-                            Array.prototype.push.apply(end, it.start);
+                            arrayPushArray(end, it.start);
                             end.push(this.sourceToken);
                             seq.items.pop();
                             return;
@@ -47032,6 +48410,7 @@ class ManifestProcessor {
             commitPath,
             issueUrlTemplate,
             issueUrlIsCustom,
+            includeDescription: this.config.includeDescription ?? false,
         });
         const trimmedSection = section.trimEnd();
         const existing = await this.getFileContent('CHANGELOG.md');
@@ -47085,7 +48464,12 @@ async function releasePr(args, config) {
         }
         const currentManifestVersions = config.manifests?.map(m => m.currentVersion) ?? [];
         info(`📦 Using ${config.provider.name} provider`);
-        const ctx = await resolveCommitContext(config);
+        const alwaysCreatePr = config.release.alwaysCreatePr ?? false;
+        // Reuse the patch fallback without changing version calculation for other commands.
+        const releaseConfig = alwaysCreatePr
+            ? { ...config, release: { ...config.release, includeChores: true } }
+            : config;
+        const ctx = await resolveCommitContext(releaseConfig, alwaysCreatePr);
         const { targetBranch, conventionalCommits: conventionalCommitsSinceLastRelease, nextVersion, baseVersion } = ctx;
         // prBranch is the destination branch for the PR; defaults to targetBranch
         const prDestBranch = config.release.prBranch ?? targetBranch;
@@ -47096,9 +48480,12 @@ async function releasePr(args, config) {
         // Process manifests
         info('');
         info('📦 Processing manifests...');
-        const manifestProcessor = new ManifestProcessor(conventionalCommitsSinceLastRelease, config);
+        const manifestProcessor = new ManifestProcessor(conventionalCommitsSinceLastRelease, {
+            ...releaseConfig,
+            updateAllVersions: config.updateAllVersions || (alwaysCreatePr && conventionalCommitsSinceLastRelease.length === 0),
+        });
         const manifestResults = await manifestProcessor.process();
-        if (conventionalCommitsSinceLastRelease.length === 0) {
+        if (conventionalCommitsSinceLastRelease.length === 0 && !alwaysCreatePr) {
             info('⚠️  No conventional commits found since last release. No Release PR created.');
             return { currentVersion: baseVersion, nextVersion: nextVersion, sourceBranch: '', targetBranch, created: false, updated: false, prTags: [], manifestFiles: [], manifestCurrentVersions: currentManifestVersions, manifestNextVersions: manifestResults.nextManifestVersions, dryRun: !!config.dryRun };
         }
@@ -60164,6 +61551,18 @@ function requireForm_data () {
 	var populate = requirePopulate();
 
 	/**
+	 * Escape CR, LF, and `"` in a multipart `name`/`filename` parameter, so a field
+	 * name or filename can not break out of its header line to inject headers or
+	 * smuggle additional parts. Matches the WHATWG HTML multipart/form-data encoding.
+	 *
+	 * @param {string} str - the parameter value to escape
+	 * @returns {string} the escaped value
+	 */
+	function escapeHeaderParam(str) {
+	  return String(str).replace(/\r/g, '%0D').replace(/\n/g, '%0A').replace(/"/g, '%22');
+	}
+
+	/**
 	 * Create readable "multipart/form-data" streams.
 	 * Can be used to submit forms
 	 * and file uploads to other web applications.
@@ -60328,7 +61727,7 @@ function requireForm_data () {
 	  var contents = '';
 	  var headers = {
 	    // add custom disposition as third element or keep it two elements if not
-	    'Content-Disposition': ['form-data', 'name="' + field + '"'].concat(contentDisposition || []),
+	    'Content-Disposition': ['form-data', 'name="' + escapeHeaderParam(field) + '"'].concat(contentDisposition || []),
 	    // if no content type. allow it to be empty array
 	    'Content-Type': [].concat(contentType || [])
 	  };
@@ -60382,7 +61781,7 @@ function requireForm_data () {
 	  }
 
 	  if (filename) {
-	    return 'filename="' + filename + '"';
+	    return 'filename="' + escapeHeaderParam(filename) + '"';
 	  }
 	};
 
@@ -62562,7 +63961,10 @@ function requireSideChannel () {
 		var channel = {
 			assert: function (key) {
 				if (!channel.has(key)) {
-					throw new $TypeError('Side channel does not contain ' + inspect(key));
+					var keyDesc = key && Object(key) === key
+						? 'the given object key'
+						: inspect(key);
+					throw new $TypeError('Side channel does not contain ' + keyDesc);
 				}
 			},
 			'delete': function (key) {
@@ -62582,7 +63984,7 @@ function requireSideChannel () {
 				$channelData.set(key, value);
 			}
 		};
-		// @ts-expect-error TODO: figure out why this is erroring
+
 		return channel;
 	};
 	return sideChannel;
@@ -62600,7 +64002,8 @@ function requireFormats () {
 
 	var Format = {
 	    RFC1738: 'RFC1738',
-	    RFC3986: 'RFC3986'
+	    RFC3986: 'RFC3986',
+	    WHATWG: 'WHATWG'
 	};
 
 	formats = {
@@ -62611,10 +64014,14 @@ function requireFormats () {
 	        },
 	        RFC3986: function (value) {
 	            return String(value);
+	        },
+	        WHATWG: function (value) {
+	            return replace.call(value, percentTwenties, '+');
 	        }
 	    },
 	    RFC1738: Format.RFC1738,
-	    RFC3986: Format.RFC3986
+	    RFC3986: Format.RFC3986,
+	    WHATWG: Format.WHATWG
 	};
 	return formats;
 }
@@ -62628,6 +64035,7 @@ function requireUtils () {
 
 	var formats = /*@__PURE__*/ requireFormats();
 	var getSideChannel = requireSideChannel();
+	var defineProperty = /*@__PURE__*/ requireEsDefineProperty();
 
 	var has = Object.prototype.hasOwnProperty;
 	var isArray = Array.isArray;
@@ -62651,6 +64059,23 @@ function requireUtils () {
 
 	var setMaxIndex = function setMaxIndex(obj, maxIndex) {
 	    overflowChannel.set(obj, maxIndex);
+	};
+
+	// Track containers produced by a `strictMerge` conflict wrap, and their current max numeric index,
+	// so repeated conflicts on one path append instead of nesting a new wrapper each time
+	var conflictChannel = getSideChannel();
+
+	var markConflict = function markConflict(obj, maxIndex) {
+	    conflictChannel.set(obj, maxIndex);
+	    return obj;
+	};
+
+	var isConflict = function isConflict(obj) {
+	    return conflictChannel.has(obj);
+	};
+
+	var getConflictIndex = function getConflictIndex(obj) {
+	    return conflictChannel.get(obj);
 	};
 
 	var hexTable = (function () {
@@ -62692,6 +64117,54 @@ function requireUtils () {
 	    return obj;
 	};
 
+	var setProperty = function setProperty(obj, key, value) {
+	    if (key === '__proto__' && defineProperty) {
+	        defineProperty(obj, key, {
+	            configurable: true,
+	            enumerable: true,
+	            value: value,
+	            writable: true
+	        });
+	    } else {
+	        obj[key] = value;
+	    }
+	};
+
+	var maxNumericIndex = function maxNumericIndex(obj, min) {
+	    var max = min;
+	    var keys = Object.keys(obj);
+	    for (var i = 0; i < keys.length; ++i) {
+	        var num = parseInt(keys[i], 10);
+	        if (String(num) === keys[i] && num > max) {
+	            max = num;
+	        }
+	    }
+
+	    return max;
+	};
+
+	// parsed arrays stay sparse until `compact`, so `length` would count the holes left by indices like `a[19]`
+	var countElements = function countElements(arr) {
+	    var count = 0;
+	    for (var i = 0; i < arr.length; ++i) {
+	        if (has.call(arr, i)) {
+	            count += 1;
+	        }
+	    }
+	    return count;
+	};
+
+	var limitedPair = function limitedPair(first, second, options) {
+	    var pair = [first, second];
+	    if (options && typeof options.arrayLimit === 'number' && pair.length > options.arrayLimit) {
+	        if (options.throwOnLimitExceeded) {
+	            throw new RangeError('Array limit exceeded. Only ' + options.arrayLimit + ' element' + (options.arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
+	        }
+	        return markOverflow(arrayToObject(pair, options), 1);
+	    }
+	    return pair;
+	};
+
 	var merge = function merge(target, source, options) {
 	    /* eslint no-param-reassign: 0 */
 	    if (!source) {
@@ -62701,7 +64174,10 @@ function requireUtils () {
 	    if (typeof source !== 'object' && typeof source !== 'function') {
 	        if (isArray(target)) {
 	            var nextIndex = target.length;
-	            if (options && typeof options.arrayLimit === 'number' && nextIndex > options.arrayLimit) {
+	            if (options && typeof options.arrayLimit === 'number' && countElements(target) >= options.arrayLimit) {
+	                if (options.throwOnLimitExceeded) {
+	                    throw new RangeError('Array limit exceeded. Only ' + options.arrayLimit + ' element' + (options.arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
+	                }
 	                return markOverflow(arrayToObject(target.concat(source), options), nextIndex);
 	            }
 	            target[nextIndex] = source;
@@ -62711,8 +64187,20 @@ function requireUtils () {
 	                var newIndex = getMaxIndex(target) + 1;
 	                target[newIndex] = source;
 	                setMaxIndex(target, newIndex);
+	            } else if (options && options.strictMerge && isConflict(target)) {
+	                var nextConflict = getConflictIndex(target) + 1;
+	                if (
+	                    options.throwOnLimitExceeded
+	                    && typeof options.arrayLimit === 'number'
+	                    && nextConflict >= options.arrayLimit
+	                ) {
+	                    throw new RangeError('Array limit exceeded. Only ' + options.arrayLimit + ' element' + (options.arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
+	                }
+	                target[nextConflict] = source;
+	                markConflict(target, nextConflict);
 	            } else if (options && options.strictMerge) {
-	                return [target, source];
+	                var conflict = limitedPair(target, source, options);
+	                return isArray(conflict) ? markConflict(conflict, 1) : conflict;
 	            } else if (
 	                (options && (options.plainObjects || options.allowPrototypes))
 	                || !has.call(Object.prototype, source)
@@ -62720,7 +64208,7 @@ function requireUtils () {
 	                target[source] = true;
 	            }
 	        } else {
-	            return [target, source];
+	            return limitedPair(target, source, options);
 	        }
 
 	        return target;
@@ -62741,6 +64229,9 @@ function requireUtils () {
 	        }
 	        var combined = [target].concat(source);
 	        if (options && typeof options.arrayLimit === 'number' && combined.length > options.arrayLimit) {
+	            if (options.throwOnLimitExceeded) {
+	                throw new RangeError('Array limit exceeded. Only ' + options.arrayLimit + ' element' + (options.arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
+	            }
 	            return markOverflow(arrayToObject(combined, options), combined.length - 1);
 	        }
 	        return combined;
@@ -62749,6 +64240,10 @@ function requireUtils () {
 	    var mergeTarget = target;
 	    if (isArray(target) && !isArray(source)) {
 	        mergeTarget = arrayToObject(target, options);
+	        if (isConflict(target)) {
+	            // the array may have grown past its last conflict, so continue after its last index
+	            markConflict(mergeTarget, target.length - 1);
+	        }
 	    }
 
 	    if (isArray(target) && isArray(source)) {
@@ -62764,6 +64259,12 @@ function requireUtils () {
 	                target[i] = item;
 	            }
 	        });
+	        if (options && typeof options.arrayLimit === 'number' && countElements(target) > options.arrayLimit) {
+	            if (options.throwOnLimitExceeded) {
+	                throw new RangeError('Array limit exceeded. Only ' + options.arrayLimit + ' element' + (options.arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
+	            }
+	            return markOverflow(arrayToObject(target, options), target.length - 1);
+	        }
 	        return target;
 	    }
 
@@ -62771,18 +64272,24 @@ function requireUtils () {
 	        var value = source[key];
 
 	        if (has.call(acc, key)) {
-	            acc[key] = merge(acc[key], value, options);
+	            setProperty(acc, key, merge(acc[key], value, options));
 	        } else {
-	            acc[key] = value;
+	            setProperty(acc, key, value);
 	        }
 
 	        if (isOverflow(source) && !isOverflow(acc)) {
-	            markOverflow(acc, getMaxIndex(source));
+	            markOverflow(acc, maxNumericIndex(acc, getMaxIndex(source)));
 	        }
 	        if (isOverflow(acc)) {
 	            var keyNum = parseInt(key, 10);
 	            if (String(keyNum) === key && keyNum >= 0 && keyNum > getMaxIndex(acc)) {
 	                setMaxIndex(acc, keyNum);
+	            }
+	        }
+	        if (isConflict(acc)) {
+	            var conflictKey = parseInt(key, 10);
+	            if (String(conflictKey) === key && conflictKey > getConflictIndex(acc)) {
+	                markConflict(acc, conflictKey);
 	            }
 	        }
 
@@ -62792,12 +64299,19 @@ function requireUtils () {
 
 	var assign = function assignSingleSource(target, source) {
 	    return Object.keys(source).reduce(function (acc, key) {
-	        acc[key] = source[key];
+	        setProperty(acc, key, source[key]);
 	        return acc;
 	    }, target);
 	};
 
 	var decode = function (str, defaultDecoder, charset) {
+	    // With no `%` there is no escape to expand, in either charset: `unescape` has
+	    // nothing to match, and `decodeURIComponent` is the identity on such a string
+	    // (and cannot throw). So only `+` -> ' ' remains, and often not even that.
+	    if (typeof str === 'string' && str.indexOf('%') === -1) {
+	        return str.indexOf('+') === -1 ? str : str.replace(/\+/g, ' ');
+	    }
+
 	    var strWithoutPlus = str.replace(/\+/g, ' ');
 	    if (charset === 'iso-8859-1') {
 	        // unescape never throws, no try...catch needed:
@@ -62809,6 +64323,57 @@ function requireUtils () {
 	    } catch (e) {
 	        return strWithoutPlus;
 	    }
+	};
+
+	var hasToPrimitive = typeof Symbol === 'function' && typeof Symbol.toPrimitive === 'symbol';
+	var arrayJoin = Array.prototype.join;
+	var arrayToString = Array.prototype.toString;
+	var objectToString = Object.prototype.toString;
+
+	// an object with no callable toString (eg, from JSON, or null-prototype) would make String() or join() throw,
+	// so it becomes its primitive valueOf or else Object.prototype.toString; arrays are walked like join walks them,
+	// copied only once an element changes, with an array already being joined becoming '' as engines do for cycles
+	var toCoercible = function toCoercible(value, joining) {
+	    if (!value || (typeof value !== 'object' && typeof value !== 'function')) {
+	        return value;
+	    }
+	    if (hasToPrimitive && value[Symbol.toPrimitive] != null) {
+	        return value;
+	    }
+	    if (isArray(value) && value.toString === arrayToString && value.join === arrayJoin) {
+	        var ancestors = joining || getSideChannel();
+	        if (ancestors.has(value)) {
+	            return '';
+	        }
+	        ancestors.set(value, true);
+	        var copy;
+	        for (var i = 0; i < value.length; i += 1) {
+	            var item = value[i];
+	            var coerced = toCoercible(item, ancestors);
+	            if (!copy && coerced !== item) {
+	                copy = [];
+	                for (var j = 0; j < i; j += 1) {
+	                    copy[j] = value[j];
+	                }
+	            }
+	            if (copy) {
+	                copy[i] = coerced;
+	            }
+	        }
+	        ancestors['delete'](value);
+	        return copy || value;
+	    }
+	    if (typeof value.toString === 'function') {
+	        return value;
+	    }
+	    var valueOf = value.valueOf;
+	    if (typeof valueOf === 'function') {
+	        var primitive = valueOf.call(value);
+	        if (!primitive || (typeof primitive !== 'object' && typeof primitive !== 'function')) {
+	            return String(primitive);
+	        }
+	    }
+	    return objectToString.call(value);
 	};
 
 	var limit = 1024;
@@ -62826,18 +64391,27 @@ function requireUtils () {
 	    if (typeof str === 'symbol') {
 	        string = Symbol.prototype.toString.call(str);
 	    } else if (typeof str !== 'string') {
-	        string = String(str);
+	        string = String(toCoercible(str));
 	    }
 
 	    if (charset === 'iso-8859-1') {
+	        // `escape` leaves `+` untouched, but a literal `+` is decoded back to a space,
+	        // so it must be percent-encoded to round-trip (the utf-8 path already does this).
 	        return escape(string).replace(/%u[0-9a-f]{4}/gi, function ($0) {
 	            return '%26%23' + parseInt($0.slice(2), 16) + '%3B';
-	        });
+	        }).replace(/\+/g, '%2B');
 	    }
 
 	    var out = '';
 	    for (var j = 0; j < string.length; j += limit) {
 	        var segment = string.length >= limit ? string.slice(j, j + limit) : string;
+	        if (j + limit < string.length) {
+	            var last = segment.charCodeAt(segment.length - 1);
+	            if (last >= 0xD800 && last <= 0xDBFF) {
+	                segment = segment.slice(0, -1);
+	                j -= 1;
+	            }
+	        }
 	        var arr = [];
 
 	        for (var i = 0; i < segment.length; ++i) {
@@ -62846,11 +64420,12 @@ function requireUtils () {
 	                c === 0x2D // -
 	                || c === 0x2E // .
 	                || c === 0x5F // _
-	                || c === 0x7E // ~
+	                || (c === 0x7E && format !== formats.WHATWG) // ~
 	                || (c >= 0x30 && c <= 0x39) // 0-9
 	                || (c >= 0x41 && c <= 0x5A) // a-z
 	                || (c >= 0x61 && c <= 0x7A) // A-Z
 	                || (format === formats.RFC1738 && (c === 0x28 || c === 0x29)) // ( )
+	                || (format === formats.WHATWG && c === 0x2A) // *
 	            ) {
 	                arr[arr.length] = segment.charAt(i);
 	                continue;
@@ -62874,13 +64449,19 @@ function requireUtils () {
 	                continue;
 	            }
 
-	            i += 1;
-	            c = 0x10000 + (((c & 0x3FF) << 10) | (segment.charCodeAt(i) & 0x3FF));
+	            var next = segment.charCodeAt(i + 1);
+	            if (c <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF) {
+	                i += 1;
+	                c = 0x10000 + (((c & 0x3FF) << 10) | (next & 0x3FF));
 
-	            arr[arr.length] = hexTable[0xF0 | (c >> 18)]
-	                + hexTable[0x80 | ((c >> 12) & 0x3F)]
-	                + hexTable[0x80 | ((c >> 6) & 0x3F)]
-	                + hexTable[0x80 | (c & 0x3F)];
+	                arr[arr.length] = hexTable[0xF0 | (c >> 18)]
+	                    + hexTable[0x80 | ((c >> 12) & 0x3F)]
+	                    + hexTable[0x80 | ((c >> 6) & 0x3F)]
+	                    + hexTable[0x80 | (c & 0x3F)];
+	            } else {
+	                // a lone surrogate has no UTF-8 encoding; like `URLSearchParams` and `TextEncoder`, emit U+FFFD
+	                arr[arr.length] = '%EF%BF%BD';
+	            }
 	        }
 
 	        out += arr.join('');
@@ -62891,7 +64472,7 @@ function requireUtils () {
 
 	var compact = function compact(value) {
 	    var queue = [{ obj: { o: value }, prop: 'o' }];
-	    var refs = [];
+	    var refs = getSideChannel();
 
 	    for (var i = 0; i < queue.length; ++i) {
 	        var item = queue[i];
@@ -62901,9 +64482,9 @@ function requireUtils () {
 	        for (var j = 0; j < keys.length; ++j) {
 	            var key = keys[j];
 	            var val = obj[key];
-	            if (typeof val === 'object' && val !== null && refs.indexOf(val) === -1) {
+	            if (typeof val === 'object' && val !== null && !refs.has(val)) {
 	                queue[queue.length] = { obj: obj, prop: key };
-	                refs[refs.length] = val;
+	                refs.set(val, true);
 	            }
 	        }
 	    }
@@ -62922,20 +64503,33 @@ function requireUtils () {
 	        return false;
 	    }
 
-	    return !!(obj.constructor && obj.constructor.isBuffer && obj.constructor.isBuffer(obj));
+	    return !!(obj.constructor && typeof obj.constructor.isBuffer === 'function' && obj.constructor.isBuffer(obj));
 	};
 
-	var combine = function combine(a, b, arrayLimit, plainObjects) {
+	var combine = function combine(a, b, arrayLimit, plainObjects, throwOnLimitExceeded) {
 	    // If 'a' is already an overflow object, add to it
 	    if (isOverflow(a)) {
-	        var newIndex = getMaxIndex(a) + 1;
-	        a[newIndex] = b;
+	        if (throwOnLimitExceeded) {
+	            throw new RangeError('Array limit exceeded. Only ' + arrayLimit + ' element' + (arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
+	        }
+	        // spread `b` one level, matching the `[].concat(a, b)` used below, so a
+	        // collection appended to an already-overflowed object is flattened
+	        // rather than nested under a single index
+	        var bValues = isArray(b) ? b : [b];
+	        var newIndex = getMaxIndex(a);
+	        for (var i = 0; i < bValues.length; ++i) {
+	            newIndex += 1;
+	            a[newIndex] = bValues[i];
+	        }
 	        setMaxIndex(a, newIndex);
 	        return a;
 	    }
 
 	    var result = [].concat(a, b);
 	    if (result.length > arrayLimit) {
+	        if (throwOnLimitExceeded) {
+	            throw new RangeError('Array limit exceeded. Only ' + arrayLimit + ' element' + (arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
+	        }
 	        return markOverflow(arrayToObject(result, { plainObjects: plainObjects }), result.length - 1);
 	    }
 	    return result;
@@ -62964,7 +64558,9 @@ function requireUtils () {
 	    isRegExp: isRegExp,
 	    markOverflow: markOverflow,
 	    maybeMap: maybeMap,
-	    merge: merge
+	    merge: merge,
+	    setProperty: setProperty,
+	    toCoercible: toCoercible
 	};
 	return utils;
 }
@@ -63012,6 +64608,7 @@ function requireStringify () {
 	    charsetSentinel: false,
 	    commaRoundTrip: false,
 	    delimiter: '&',
+	    depth: Infinity,
 	    encode: true,
 	    encodeDotInKeys: false,
 	    encoder: utils.encode,
@@ -63056,9 +64653,15 @@ function requireStringify () {
 	    formatter,
 	    encodeValuesOnly,
 	    charset,
-	    sideChannel
+	    sideChannel,
+	    depth,
+	    currentDepth
 	) {
 	    var obj = object;
+
+	    if (currentDepth > depth) {
+	        throw new RangeError('Input depth exceeded depth option of ' + depth);
+	    }
 
 	    var tmpSc = sideChannel;
 	    var step = 0;
@@ -63079,9 +64682,9 @@ function requireStringify () {
 	        }
 	    }
 
-	    if (typeof filter === 'function') {
-	        obj = filter(prefix, obj);
-	    } else if (obj instanceof Date) {
+	    obj = typeof filter === 'function' ? filter(prefix, obj) : obj;
+
+	    if (obj instanceof Date) {
 	        obj = serializeDate(obj);
 	    } else if (generateArrayPrefix === 'comma' && isArray(obj)) {
 	        obj = utils.maybeMap(obj, function (value) {
@@ -63094,7 +64697,7 @@ function requireStringify () {
 
 	    if (obj === null) {
 	        if (strictNullHandling) {
-	            return encoder && !encodeValuesOnly ? encoder(prefix, defaults.encoder, charset, 'key', format) : prefix;
+	            return formatter(encoder && !encodeValuesOnly ? encoder(prefix, defaults.encoder, charset, 'key', format) : prefix);
 	        }
 
 	        obj = '';
@@ -63118,9 +64721,11 @@ function requireStringify () {
 	    if (generateArrayPrefix === 'comma' && isArray(obj)) {
 	        // we need to join elements in
 	        if (encodeValuesOnly && encoder) {
-	            obj = utils.maybeMap(obj, encoder);
+	            obj = utils.maybeMap(obj, function (v) {
+	                return v == null ? v : encoder(v, defaults.encoder, charset, 'value', format);
+	            });
 	        }
-	        objKeys = [{ value: obj.length > 0 ? obj.join(',') || null : void undefined }];
+	        objKeys = [{ value: obj.length > 0 ? utils.toCoercible(obj).join(',') || null : void undefined }];
 	    } else if (isArray(filter)) {
 	        objKeys = filter;
 	    } else {
@@ -63128,12 +64733,12 @@ function requireStringify () {
 	        objKeys = sort ? keys.sort(sort) : keys;
 	    }
 
-	    var encodedPrefix = encodeDotInKeys ? String(prefix).replace(/\./g, '%2E') : String(prefix);
+	    var encodedPrefix = String(prefix);
 
 	    var adjustedPrefix = commaRoundTrip && isArray(obj) && obj.length === 1 ? encodedPrefix + '[]' : encodedPrefix;
 
-	    if (allowEmptyArrays && isArray(obj) && obj.length === 0) {
-	        return adjustedPrefix + '[]';
+	    if (allowEmptyArrays && isArray(obj) && obj.length === 0 && Object.keys(obj).length === 0) {
+	        return formatter(encoder && !encodeValuesOnly ? encoder(adjustedPrefix, defaults.encoder, charset, 'key', format) : adjustedPrefix) + '[]';
 	    }
 
 	    for (var j = 0; j < objKeys.length; ++j) {
@@ -63172,7 +64777,9 @@ function requireStringify () {
 	            formatter,
 	            encodeValuesOnly,
 	            charset,
-	            valueSideChannel
+	            valueSideChannel,
+	            depth,
+	            currentDepth + 1
 	        ));
 	    }
 
@@ -63216,7 +64823,7 @@ function requireStringify () {
 	    }
 
 	    var arrayFormat;
-	    if (opts.arrayFormat in arrayPrefixGenerators) {
+	    if (has.call(arrayPrefixGenerators, opts.arrayFormat)) {
 	        arrayFormat = opts.arrayFormat;
 	    } else if ('indices' in opts) {
 	        arrayFormat = opts.indices ? 'indices' : 'repeat';
@@ -63239,6 +64846,7 @@ function requireStringify () {
 	        charsetSentinel: typeof opts.charsetSentinel === 'boolean' ? opts.charsetSentinel : defaults.charsetSentinel,
 	        commaRoundTrip: !!opts.commaRoundTrip,
 	        delimiter: typeof opts.delimiter === 'undefined' ? defaults.delimiter : opts.delimiter,
+	        depth: typeof opts.depth === 'number' ? opts.depth : defaults.depth,
 	        encode: typeof opts.encode === 'boolean' ? opts.encode : defaults.encode,
 	        encodeDotInKeys: typeof opts.encodeDotInKeys === 'boolean' ? opts.encodeDotInKeys : defaults.encodeDotInKeys,
 	        encoder: typeof opts.encoder === 'function' ? opts.encoder : defaults.encoder,
@@ -63264,7 +64872,9 @@ function requireStringify () {
 	        filter = options.filter;
 	        obj = filter('', obj);
 	    } else if (isArray(options.filter)) {
-	        filter = options.filter;
+	        // a copy: `sort` below must not reorder the caller's array, and nested
+	        // levels take their key order from the sorted copy
+	        filter = options.filter.slice();
 	        objKeys = filter;
 	    }
 
@@ -63288,14 +64898,22 @@ function requireStringify () {
 	    var sideChannel = getSideChannel();
 	    for (var i = 0; i < objKeys.length; ++i) {
 	        var key = objKeys[i];
+
+	        if (typeof key === 'undefined' || key === null) {
+	            continue;
+	        }
+
 	        var value = obj[key];
 
 	        if (options.skipNulls && value === null) {
 	            continue;
 	        }
+
+	        var encodedKey = options.encodeDotInKeys ? String(key).replace(/\./g, '%2E') : String(key);
+
 	        pushToArray(keys, stringify(
 	            value,
-	            key,
+	            encodedKey,
 	            generateArrayPrefix,
 	            commaRoundTrip,
 	            options.allowEmptyArrays,
@@ -63303,7 +64921,7 @@ function requireStringify () {
 	            options.skipNulls,
 	            options.encodeDotInKeys,
 	            options.encode ? options.encoder : null,
-	            options.filter,
+	            filter,
 	            options.sort,
 	            options.allowDots,
 	            options.serializeDate,
@@ -63311,7 +64929,9 @@ function requireStringify () {
 	            options.formatter,
 	            options.encodeValuesOnly,
 	            options.charset,
-	            sideChannel
+	            sideChannel,
+	            options.depth,
+	            0
 	        ));
 	    }
 
@@ -63321,10 +64941,10 @@ function requireStringify () {
 	    if (options.charsetSentinel) {
 	        if (options.charset === 'iso-8859-1') {
 	            // encodeURIComponent('&#10003;'), the "numeric entity" representation of a checkmark
-	            prefix += 'utf8=%26%2310003%3B&';
+	            prefix += 'utf8=%26%2310003%3B' + options.delimiter;
 	        } else {
 	            // encodeURIComponent('✓')
-	            prefix += 'utf8=%E2%9C%93&';
+	            prefix += 'utf8=%E2%9C%93' + options.delimiter;
 	        }
 	    }
 
@@ -63333,17 +64953,69 @@ function requireStringify () {
 	return stringify_1;
 }
 
-var parse$1;
+var parse$2;
 var hasRequiredParse$1;
 
 function requireParse$1 () {
-	if (hasRequiredParse$1) return parse$1;
+	if (hasRequiredParse$1) return parse$2;
 	hasRequiredParse$1 = 1;
 
+	var getSideChannel = requireSideChannel();
 	var utils = /*@__PURE__*/ requireUtils();
 
 	var has = Object.prototype.hasOwnProperty;
 	var isArray = Array.isArray;
+	var getPrototypeOf = Object.getPrototypeOf;
+	var fromCharCode = String.fromCharCode;
+
+	var isPlainContainer = function isPlainContainer(value) {
+	    if (!value || typeof value !== 'object') {
+	        return false;
+	    }
+	    if (isArray(value)) {
+	        return true;
+	    }
+	    var proto = getPrototypeOf(value);
+	    return proto === Object.prototype || proto === null;
+	};
+
+	var emptyCopyOf = function emptyCopyOf(value) {
+	    if (isArray(value)) {
+	        var arr = [];
+	        arr.length = value.length;
+	        return arr;
+	    }
+	    return getPrototypeOf(value) === null ? { __proto__: null } : {};
+	};
+
+	// `merge` and `compact` modify the containers they are given, so copy the caller's arrays and plain objects first
+	var copyInput = function copyInput(input) {
+	    var copies = getSideChannel();
+	    var result = {};
+	    var queue = [{ source: input, target: result }];
+
+	    for (var i = 0; i < queue.length; ++i) {
+	        var source = queue[i].source;
+	        var target = queue[i].target;
+	        var keys = Object.keys(source);
+	        for (var j = 0; j < keys.length; ++j) {
+	            var value = source[keys[j]];
+	            // `target[key] =` would invoke the `__proto__` setter. `setProperty` stores that key as data.
+	            if (isPlainContainer(value)) {
+	                if (!copies.has(value)) {
+	                    var copy = emptyCopyOf(value);
+	                    copies.set(value, copy);
+	                    queue[queue.length] = { source: value, target: copy };
+	                }
+	                utils.setProperty(target, keys[j], copies.get(value));
+	            } else {
+	                utils.setProperty(target, keys[j], value);
+	            }
+	        }
+	    }
+
+	    return result;
+	};
 
 	var defaults = {
 	    allowDots: false,
@@ -63372,16 +65044,37 @@ function requireParse$1 () {
 
 	var interpretNumericEntities = function (str) {
 	    return str.replace(/&#(\d+);/g, function ($0, numberStr) {
-	        return String.fromCharCode(parseInt(numberStr, 10));
+	        var c = parseInt(numberStr, 10);
+	        if (c > 0xFFFF && c <= 0x10FFFF) {
+	            // `String.fromCodePoint` is not available in every supported engine, so build the surrogate pair by hand
+	            c -= 0x10000;
+	            return fromCharCode(0xD800 | (c >> 10), 0xDC00 | (c & 0x3FF));
+	        }
+	        return fromCharCode(c);
 	    });
 	};
 
 	var parseArrayValue = function (val, options, currentArrayLength) {
 	    if (val && typeof val === 'string' && options.comma && val.indexOf(',') > -1) {
+	        if (options.throwOnLimitExceeded) {
+	            var commaCount = 0;
+	            var commaIndex = val.indexOf(',');
+	            while (commaIndex > -1) {
+	                commaCount += 1;
+	                if (commaCount >= options.arrayLimit) {
+	                    throw new RangeError('Array limit exceeded. Only ' + options.arrayLimit + ' element' + (options.arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
+	                }
+	                commaIndex = val.indexOf(',', commaIndex + 1);
+	            }
+	        }
 	        return val.split(',');
 	    }
 
-	    if (options.throwOnLimitExceeded && currentArrayLength >= options.arrayLimit) {
+	    if (
+	        options.throwOnLimitExceeded
+	        && currentArrayLength >= options.arrayLimit
+	        && currentArrayLength > 0
+	    ) {
 	        throw new RangeError('Array limit exceeded. Only ' + options.arrayLimit + ' element' + (options.arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
 	    }
 
@@ -63441,6 +65134,9 @@ function requireParse$1 () {
 	        var bracketEqualsPos = part.indexOf(']=');
 	        var pos = bracketEqualsPos === -1 ? part.indexOf('=') : bracketEqualsPos + 1;
 
+	        // `[]` belongs to the key, so look for it at the split point, not anywhere in the part
+	        var isEmptyBracketKey = pos > 1 && part.slice(pos - 2, pos) === '[]';
+
 	        var key;
 	        var val;
 	        if (pos === -1) {
@@ -63454,7 +65150,7 @@ function requireParse$1 () {
 	                    parseArrayValue(
 	                        part.slice(pos + 1),
 	                        options,
-	                        isArray(obj[key]) ? obj[key].length : 0
+	                        isArray(obj[key]) && (options.duplicates === 'combine' || isEmptyBracketKey) ? obj[key].length : 0
 	                    ),
 	                    function (encodedVal) {
 	                        return options.decoder(encodedVal, defaults.decoder, charset, 'value');
@@ -63464,28 +65160,28 @@ function requireParse$1 () {
 	        }
 
 	        if (val && options.interpretNumericEntities && charset === 'iso-8859-1') {
-	            val = interpretNumericEntities(String(val));
+	            val = utils.maybeMap(val, function (value) {
+	                return value ? interpretNumericEntities(String(value)) : value;
+	            });
 	        }
 
-	        if (part.indexOf('[]=') > -1) {
+	        if (isEmptyBracketKey) {
 	            val = isArray(val) ? [val] : val;
 	        }
 
 	        if (options.comma && isArray(val) && val.length > options.arrayLimit) {
-	            if (options.throwOnLimitExceeded) {
-	                throw new RangeError('Array limit exceeded. Only ' + options.arrayLimit + ' element' + (options.arrayLimit === 1 ? '' : 's') + ' allowed in an array.');
-	            }
-	            val = utils.combine([], val, options.arrayLimit, options.plainObjects);
+	            val = utils.combine([], val, options.arrayLimit, options.plainObjects, options.throwOnLimitExceeded);
 	        }
 
 	        if (key !== null) {
 	            var existing = has.call(obj, key);
-	            if (existing && (options.duplicates === 'combine' || part.indexOf('[]=') > -1)) {
+	            if (existing && (options.duplicates === 'combine' || isEmptyBracketKey)) {
 	                obj[key] = utils.combine(
 	                    obj[key],
 	                    val,
 	                    options.arrayLimit,
-	                    options.plainObjects
+	                    options.plainObjects,
+	                    options.throwOnLimitExceeded
 	                );
 	            } else if (!existing || options.duplicates === 'last') {
 	                obj[key] = val;
@@ -63494,6 +65190,10 @@ function requireParse$1 () {
 	    }
 
 	    return obj;
+	};
+
+	var stripWrappingBrackets = function stripWrappingBrackets(key) {
+	    return key.charAt(0) === '[' && key.charAt(key.length - 1) === ']' ? key.slice(1, -1) : key;
 	};
 
 	var parseObject = function (chain, val, options, valuesParsed) {
@@ -63520,13 +65220,14 @@ function requireParse$1 () {
 	                        [],
 	                        leaf,
 	                        options.arrayLimit,
-	                        options.plainObjects
+	                        options.plainObjects,
+	                        options.throwOnLimitExceeded
 	                    );
 	            }
 	        } else {
 	            obj = options.plainObjects ? { __proto__: null } : {};
-	            var cleanRoot = root.charAt(0) === '[' && root.charAt(root.length - 1) === ']' ? root.slice(1, -1) : root;
-	            var decodedRoot = options.decodeDotInKeys ? cleanRoot.replace(/%2E/g, '.') : cleanRoot;
+	            var cleanRoot = stripWrappingBrackets(root);
+	            var decodedRoot = options.decodeDotInKeys ? cleanRoot.replace(/%2E/gi, '.') : cleanRoot;
 	            var index = parseInt(decodedRoot, 10);
 	            var isValidArrayIndex = !isNaN(index)
 	                && root !== decodedRoot
@@ -63534,7 +65235,7 @@ function requireParse$1 () {
 	                && index >= 0
 	                && options.parseArrays;
 	            if (!options.parseArrays && decodedRoot === '') {
-	                obj = { 0: leaf };
+	                obj[0] = leaf;
 	            } else if (isValidArrayIndex && index < options.arrayLimit) {
 	                obj = [];
 	                obj[index] = leaf;
@@ -63554,11 +65255,52 @@ function requireParse$1 () {
 	    return leaf;
 	};
 
-	var splitKeyIntoSegments = function splitKeyIntoSegments(givenKey, options) {
-	    var key = options.allowDots ? givenKey.replace(/\.([^.[]+)/g, '[$1]') : givenKey;
+	// Behaves like `key.replace(/\.([^.[]+)/g, '[$1]')`, but only rewrites a dot
+	// that sits at bracket depth 0. A literal dot already inside a `[...]` segment
+	// is left untouched instead of corrupting the key (e.g. "outer[a.b]"). (#617)
+	var topLevelDotsToBrackets = function topLevelDotsToBrackets(key) {
+	    var result = '';
+	    var depth = 0;
+	    for (var i = 0; i < key.length; i += 1) {
+	        var cu = key.charCodeAt(i);
+	        if (cu === 0x5B) { // '['
+	            depth += 1;
+	            result += '[';
+	        } else if (cu === 0x5D) { // ']'
+	            if (depth > 0) {
+	                depth -= 1;
+	            }
+	            result += ']';
+	        } else if (
+	            cu === 0x2E // '.'
+	            && depth === 0
+	            && i + 1 < key.length
+	            && key.charCodeAt(i + 1) !== 0x2E // not another '.'
+	            && key.charCodeAt(i + 1) !== 0x5B // not '['
+	        ) {
+	            var start = i + 1;
+	            var j = start;
+	            while (j < key.length && key.charCodeAt(j) !== 0x2E && key.charCodeAt(j) !== 0x5B) {
+	                j += 1;
+	            }
+	            result += '[' + key.slice(start, j) + ']';
+	            i = j - 1;
+	        } else {
+	            result += key.charAt(i);
+	        }
+	    }
+	    return result;
+	};
 
+	// Split a key like "a[b][c[]]" into ['a', '[b]', '[c[]]'] while preserving
+	// qs parse semantics for depth/prototype guards.
+	var splitKeyIntoSegments = function splitKeyIntoSegments(originalKey, options) {
+	    var key = options.allowDots ? topLevelDotsToBrackets(originalKey) : originalKey;
+
+	    // depth <= 0 keeps the whole key as one segment
 	    if (options.depth <= 0) {
-	        if (!options.plainObjects && has.call(Object.prototype, key)) {
+	        // `parseObject` strips one wrapping bracket pair, so guard the key it will store ("[toString]" -> "toString")
+	        if (!options.plainObjects && has.call(Object.prototype, stripWrappingBrackets(key))) {
 	            if (!options.allowPrototypes) {
 	                return;
 	            }
@@ -63567,14 +65309,11 @@ function requireParse$1 () {
 	        return [key];
 	    }
 
-	    var brackets = /(\[[^[\]]*])/;
-	    var child = /(\[[^[\]]*])/g;
+	    var segments = [];
 
-	    var segment = brackets.exec(key);
-	    var parent = segment ? key.slice(0, segment.index) : key;
-
-	    var keys = [];
-
+	    // parent before the first '[' (may be empty if key starts with '[')
+	    var first = key.indexOf('[');
+	    var parent = first >= 0 ? key.slice(0, first) : key;
 	    if (parent) {
 	        if (!options.plainObjects && has.call(Object.prototype, parent)) {
 	            if (!options.allowPrototypes) {
@@ -63582,32 +65321,62 @@ function requireParse$1 () {
 	            }
 	        }
 
-	        keys[keys.length] = parent;
+	        segments[segments.length] = parent;
 	    }
 
-	    var i = 0;
-	    while ((segment = child.exec(key)) !== null && i < options.depth) {
-	        i += 1;
+	    var n = key.length;
+	    var open = first;
+	    var collected = 0;
 
-	        var segmentContent = segment[1].slice(1, -1);
-	        if (!options.plainObjects && has.call(Object.prototype, segmentContent)) {
-	            if (!options.allowPrototypes) {
-	                return;
+	    while (open >= 0 && collected < options.depth) {
+	        var level = 1;
+	        var i = open + 1;
+	        var close = -1;
+
+	        // balance nested '[' and ']' inside this bracket group using a nesting level counter
+	        while (i < n && close < 0) {
+	            var cu = key.charCodeAt(i);
+	            if (cu === 0x5B) { // '['
+	                level += 1;
+	            } else if (cu === 0x5D) { // ']'
+	                level -= 1;
+	                if (level === 0) {
+	                    close = i; // found matching close; loop will exit by condition
+	                }
 	            }
+	            i += 1;
 	        }
 
-	        keys[keys.length] = segment[1];
+	        if (close < 0) {
+	            // Unterminated group: wrap the raw remainder in one bracket pair so it stays
+	            // a single literal segment (e.g. "[[]b" -> "[[]b]"); we do not infer missing ']'.
+	            segments[segments.length] = '[' + key.slice(open) + ']';
+	            return segments;
+	        }
+
+	        var seg = key.slice(open, close + 1);
+	        // prototype guard for the content of this group
+	        var content = seg.slice(1, -1);
+	        if (!options.plainObjects && has.call(Object.prototype, content) && !options.allowPrototypes) {
+	            return;
+	        }
+
+	        segments[segments.length] = seg;
+	        collected += 1;
+
+	        // find the next '[' after this balanced group
+	        open = key.indexOf('[', close + 1);
 	    }
 
-	    if (segment) {
+	    if (open >= 0) {
 	        if (options.strictDepth === true) {
 	            throw new RangeError('Input depth exceeded depth option of ' + options.depth + ' and strictDepth is true');
 	        }
 
-	        keys[keys.length] = '[' + key.slice(segment.index) + ']';
+	        segments[segments.length] = '[' + key.slice(open) + ']';
 	    }
 
-	    return keys;
+	    return segments;
 	};
 
 	var parseKeys = function parseQueryStringKeys(givenKey, val, options, valuesParsed) {
@@ -63686,14 +65455,14 @@ function requireParse$1 () {
 	    };
 	};
 
-	parse$1 = function (str, opts) {
+	parse$2 = function (str, opts) {
 	    var options = normalizeParseOptions(opts);
 
 	    if (str === '' || str === null || typeof str === 'undefined') {
 	        return options.plainObjects ? { __proto__: null } : {};
 	    }
 
-	    var tempObj = typeof str === 'string' ? parseValues(str, options) : str;
+	    var tempObj = typeof str === 'string' ? parseValues(str, options) : copyInput(str);
 	    var obj = options.plainObjects ? { __proto__: null } : {};
 
 	    // Iterate over the keys and setup the new object
@@ -63711,7 +65480,7 @@ function requireParse$1 () {
 
 	    return utils.compact(obj);
 	};
-	return parse$1;
+	return parse$2;
 }
 
 var lib;
@@ -69361,12 +71130,13 @@ function requireHttpCacheSemantics () {
 
 	    /**
 	     * @param {{headers: Record<string, string>, synchronous: boolean}|undefined} revalidation - Revalidation information, if any.
-	     * @returns {{response: {headers: Record<string, string>}, revalidation: {headers: Record<string, string>, synchronous: boolean}|undefined}} An object with a cached response headers and revalidation info.
+	     * @returns {{response: HttpResponse, revalidation: {headers: Record<string, string>, synchronous: boolean}|undefined}} An object with a cached response headers and revalidation info.
 	     */
 	    _evaluateRequestHitResult(revalidation) {
 	        return {
 	            response: {
 	                headers: this.responseHeaders(),
+	                status: this._status,
 	            },
 	            revalidation,
 	        };
@@ -69414,9 +71184,9 @@ function requireHttpCacheSemantics () {
 	     * }
 	     * ```
 	     * @param {HttpRequest} req - new incoming HTTP request
-	     * @returns {{response: {headers: Record<string, string>}|undefined, revalidation: {headers: Record<string, string>, synchronous: boolean}|undefined}} An object containing keys:
+	     * @returns {{response: HttpResponse|undefined, revalidation: {headers: Record<string, string>, synchronous: boolean}|undefined}} An object containing keys:
 	     *   - revalidation: { headers: Record<string, string>, synchronous: boolean } Set if you should send this to the origin server
-	     *   - response: { headers: Record<string, string> } Set if you can respond to the client with these cached headers
+	     *   - response: HttpResponse Set if you can respond to the client with these cached headers
 	     */
 	    evaluateRequest(req) {
 	        this._assertRequestHasHeaders(req);
@@ -69511,18 +71281,32 @@ function requireHttpCacheSemantics () {
 	            return true;
 	        }
 
-	        // A Vary header field-value of "*" always fails to match
-	        if (this._resHeaders.vary === '*') {
-	            return false;
-	        }
-
 	        const fields = this._resHeaders.vary
 	            .trim()
 	            .toLowerCase()
 	            .split(/\s*,\s*/);
+
 	        for (const name of fields) {
-	            if (req.headers[name] !== this._reqHeaders[name]) return false;
+	            // A Vary header field-value of "*" always fails to match
+	            if (name === '*') {
+	                return false;
+	            }
+
+	            const newReq = Object.prototype.hasOwnProperty.call(
+	                req.headers,
+	                name
+	            ) && req.headers[name];
+
+	            const cachedReq = Object.prototype.hasOwnProperty.call(
+	                this._reqHeaders,
+	                name
+	            ) && this._reqHeaders[name];
+
+	            if (newReq !== cachedReq) {
+	                return false;
+	            }
 	        }
+
 	        return true;
 	    }
 
@@ -69581,6 +71365,14 @@ function requireHttpCacheSemantics () {
 	        headers.age = `${Math.round(age)}`;
 	        headers.date = new Date(this.now()).toUTCString();
 	        return headers;
+	    }
+
+	    /**
+	     * Returns the status code of the cached response.
+	     * @returns {number} The response status code.
+	     */
+	    status() {
+	      return this._status;
 	    }
 
 	    /**
@@ -76044,7 +77836,7 @@ function expand(template, context) {
 }
 
 // pkg/dist-src/parse.js
-function parse(options) {
+function parse$1(options) {
   let method = options.method.toUpperCase();
   let url = (options.url || "/").replace(/:([a-z]\w+)/g, "{$1}");
   let headers = Object.assign({}, options.headers);
@@ -76110,7 +77902,7 @@ function parse(options) {
 
 // pkg/dist-src/endpoint-with-defaults.js
 function endpointWithDefaults(defaults, route, options) {
-  return parse(merge(defaults, route, options));
+  return parse$1(merge(defaults, route, options));
 }
 
 // pkg/dist-src/with-defaults.js
@@ -76121,192 +77913,221 @@ function withDefaults$2(oldDefaults, newDefaults) {
     DEFAULTS: DEFAULTS2,
     defaults: withDefaults$2.bind(null, DEFAULTS2),
     merge: merge.bind(null, DEFAULTS2),
-    parse
+    parse: parse$1
   });
 }
 
 // pkg/dist-src/index.js
 var endpoint = withDefaults$2(null, DEFAULTS);
 
-var fastContentTypeParse = {};
-
-var hasRequiredFastContentTypeParse;
-
-function requireFastContentTypeParse () {
-	if (hasRequiredFastContentTypeParse) return fastContentTypeParse;
-	hasRequiredFastContentTypeParse = 1;
-
-	const NullObject = function NullObject () { };
-	NullObject.prototype = Object.create(null);
-
-	/**
-	 * RegExp to match *( ";" parameter ) in RFC 7231 sec 3.1.1.1
-	 *
-	 * parameter     = token "=" ( token / quoted-string )
-	 * token         = 1*tchar
-	 * tchar         = "!" / "#" / "$" / "%" / "&" / "'" / "*"
-	 *               / "+" / "-" / "." / "^" / "_" / "`" / "|" / "~"
-	 *               / DIGIT / ALPHA
-	 *               ; any VCHAR, except delimiters
-	 * quoted-string = DQUOTE *( qdtext / quoted-pair ) DQUOTE
-	 * qdtext        = HTAB / SP / %x21 / %x23-5B / %x5D-7E / obs-text
-	 * obs-text      = %x80-FF
-	 * quoted-pair   = "\" ( HTAB / SP / VCHAR / obs-text )
-	 */
-	const paramRE = /; *([!#$%&'*+.^\w`|~-]+)=("(?:[\v\u0020\u0021\u0023-\u005b\u005d-\u007e\u0080-\u00ff]|\\[\v\u0020-\u00ff])*"|[!#$%&'*+.^\w`|~-]+) */gu;
-
-	/**
-	 * RegExp to match quoted-pair in RFC 7230 sec 3.2.6
-	 *
-	 * quoted-pair = "\" ( HTAB / SP / VCHAR / obs-text )
-	 * obs-text    = %x80-FF
-	 */
-	const quotedPairRE = /\\([\v\u0020-\u00ff])/gu;
-
-	/**
-	 * RegExp to match type in RFC 7231 sec 3.1.1.1
-	 *
-	 * media-type = type "/" subtype
-	 * type       = token
-	 * subtype    = token
-	 */
-	const mediaTypeRE = /^[!#$%&'*+.^\w|~-]+\/[!#$%&'*+.^\w|~-]+$/u;
-
-	// default ContentType to prevent repeated object creation
-	const defaultContentType = { type: '', parameters: new NullObject() };
-	Object.freeze(defaultContentType.parameters);
-	Object.freeze(defaultContentType);
-
-	/**
-	 * Parse media type to object.
-	 *
-	 * @param {string|object} header
-	 * @return {Object}
-	 * @public
-	 */
-
-	function parse (header) {
-	  if (typeof header !== 'string') {
-	    throw new TypeError('argument header is required and must be a string')
-	  }
-
-	  let index = header.indexOf(';');
-	  const type = index !== -1
-	    ? header.slice(0, index).trim()
-	    : header.trim();
-
-	  if (mediaTypeRE.test(type) === false) {
-	    throw new TypeError('invalid media type')
-	  }
-
-	  const result = {
-	    type: type.toLowerCase(),
-	    parameters: new NullObject()
-	  };
-
-	  // parse parameters
-	  if (index === -1) {
-	    return result
-	  }
-
-	  let key;
-	  let match;
-	  let value;
-
-	  paramRE.lastIndex = index;
-
-	  while ((match = paramRE.exec(header))) {
-	    if (match.index !== index) {
-	      throw new TypeError('invalid parameter format')
-	    }
-
-	    index += match[0].length;
-	    key = match[1].toLowerCase();
-	    value = match[2];
-
-	    if (value[0] === '"') {
-	      // remove quotes and escapes
-	      value = value
-	        .slice(1, value.length - 1);
-
-	      quotedPairRE.test(value) && (value = value.replace(quotedPairRE, '$1'));
-	    }
-
-	    result.parameters[key] = value;
-	  }
-
-	  if (index !== header.length) {
-	    throw new TypeError('invalid parameter format')
-	  }
-
-	  return result
-	}
-
-	function safeParse (header) {
-	  if (typeof header !== 'string') {
-	    return defaultContentType
-	  }
-
-	  let index = header.indexOf(';');
-	  const type = index !== -1
-	    ? header.slice(0, index).trim()
-	    : header.trim();
-
-	  if (mediaTypeRE.test(type) === false) {
-	    return defaultContentType
-	  }
-
-	  const result = {
-	    type: type.toLowerCase(),
-	    parameters: new NullObject()
-	  };
-
-	  // parse parameters
-	  if (index === -1) {
-	    return result
-	  }
-
-	  let key;
-	  let match;
-	  let value;
-
-	  paramRE.lastIndex = index;
-
-	  while ((match = paramRE.exec(header))) {
-	    if (match.index !== index) {
-	      return defaultContentType
-	    }
-
-	    index += match[0].length;
-	    key = match[1].toLowerCase();
-	    value = match[2];
-
-	    if (value[0] === '"') {
-	      // remove quotes and escapes
-	      value = value
-	        .slice(1, value.length - 1);
-
-	      quotedPairRE.test(value) && (value = value.replace(quotedPairRE, '$1'));
-	    }
-
-	    result.parameters[key] = value;
-	  }
-
-	  if (index !== header.length) {
-	    return defaultContentType
-	  }
-
-	  return result
-	}
-
-	fastContentTypeParse.default = { parse, safeParse };
-	fastContentTypeParse.parse = parse;
-	fastContentTypeParse.safeParse = safeParse;
-	fastContentTypeParse.defaultContentType = defaultContentType;
-	return fastContentTypeParse;
+/*!
+ * content-type
+ * Copyright(c) 2015 Douglas Christopher Wilson
+ * MIT Licensed
+ */
+const SP = 32; // " "
+const HTAB = 9; // "\t"
+const SEMI = 59; // ";"
+const EQ = 61; // "="
+const DQUOTE = 34; // '"'
+const BSLASH = 92; // "\\"
+const COMMA = 44; // ","
+const LOWER_CASE = 1;
+const OWS = 2;
+const SEMI_FLAG = 4;
+const COMMA_FLAG = 8;
+const TOKEN_FLAG = 16;
+const NON_ASCII = 0xff00;
+const CASE_FLAGS = LOWER_CASE | NON_ASCII;
+/**
+ * Character flags used to normalize HTTP field values while scanning.
+ * Out-of-range reads intentionally coerce to zero in bitwise expressions.
+ */
+const CHAR_MAP = new Uint8Array(0x100);
+CHAR_MAP[HTAB] |= OWS;
+CHAR_MAP[SP] |= OWS;
+CHAR_MAP[SEMI] |= SEMI_FLAG;
+CHAR_MAP[COMMA] |= COMMA_FLAG;
+for (let code = 0x80 /* non-ASCII */; code <= 0xff; code++) {
+    CHAR_MAP[code] |= LOWER_CASE;
 }
-
-var fastContentTypeParseExports = requireFastContentTypeParse();
+for (const char of "!#$%&'*+-.^_`|~") {
+    CHAR_MAP[char.charCodeAt(0)] |= TOKEN_FLAG;
+}
+for (let code = 0x30 /* 0 */; code <= 0x39 /* 9 */; code++) {
+    CHAR_MAP[code] |= TOKEN_FLAG;
+}
+for (let code = 0x41 /* A */; code <= 0x5a /* Z */; code++) {
+    CHAR_MAP[code] |= LOWER_CASE | TOKEN_FLAG;
+}
+for (let code = 0x61 /* a */; code <= 0x7a /* z */; code++) {
+    CHAR_MAP[code] |= TOKEN_FLAG;
+}
+/**
+ * Null object perf optimization. Faster than `Object.create(null)` and `{ __proto__: null }`.
+ */
+const NullObject = /* @__PURE__ */ (() => {
+    const C = function () { };
+    C.prototype = Object.create(null);
+    return C;
+})();
+/**
+ * Parse a `Content-Type` header.
+ */
+function parse(header, options) {
+    const stopFlags = SEMI_FLAG | (0);
+    const len = header.length;
+    let valueStart = 0;
+    while ((CHAR_MAP[header.charCodeAt(valueStart)] & OWS) !== 0) {
+        valueStart++;
+    }
+    let index = valueStart;
+    let typeFlags = 0;
+    let whitespace = -1;
+    let stop = 0;
+    while (index < len) {
+        const code = header.charCodeAt(index);
+        const flags = CHAR_MAP[code];
+        if ((flags & stopFlags) !== 0) {
+            stop |= flags & COMMA_FLAG;
+            break;
+        }
+        if ((flags & OWS) !== 0) {
+            if (whitespace === -1)
+                whitespace = index;
+        }
+        else {
+            whitespace = -1;
+        }
+        typeFlags |= (code & NON_ASCII) | flags;
+        index++;
+    }
+    const valueEnd = whitespace === -1 ? index : whitespace;
+    const value = header.slice(valueStart, valueEnd);
+    const type = (typeFlags & CASE_FLAGS) === 0 ? value : value.toLowerCase();
+    if (index === len || stop !== 0) {
+        return { type, index, parameters: new NullObject() };
+    }
+    return parseParameters(header, type, index, len, stopFlags);
+}
+/**
+ * Parses the parameters of a `Content-Type` header starting at the given index.
+ */
+function parseParameters(header, type, index, len, stopFlags) {
+    const parameters = new NullObject();
+    parameter: while (index < len) {
+        index++; // Skip over ;
+        while ((CHAR_MAP[header.charCodeAt(index)] & OWS) !== 0) {
+            index++;
+        }
+        const keyStart = index;
+        let keyFlags = 0;
+        let keyWhitespace = -1;
+        while (index < len) {
+            const code = header.charCodeAt(index);
+            const flags = CHAR_MAP[code];
+            if ((flags & stopFlags) !== 0) {
+                if ((flags & COMMA_FLAG) !== 0)
+                    break parameter;
+                continue parameter;
+            }
+            if (code === EQ) {
+                const keyEnd = keyWhitespace === -1 ? index : keyWhitespace;
+                const value = header.slice(keyStart, keyEnd);
+                const key = (keyFlags & CASE_FLAGS) === 0 ? value : value.toLowerCase();
+                index++;
+                while ((CHAR_MAP[header.charCodeAt(index)] & OWS) !== 0) {
+                    index++;
+                }
+                if (index < len && header.charCodeAt(index) === DQUOTE) {
+                    const quotedStart = ++index;
+                    let escaped = false;
+                    while (index < len) {
+                        const code = header.charCodeAt(index);
+                        if (code === DQUOTE) {
+                            if (parameters[key] === undefined) {
+                                parameters[key] = escaped
+                                    ? unescapeQuotedPairs(header, quotedStart, index)
+                                    : header.slice(quotedStart, index);
+                            }
+                            index++;
+                            let stop = 0;
+                            // Discard characters between quote and delimiter.
+                            while (index < len) {
+                                const code = header.charCodeAt(index);
+                                const flags = CHAR_MAP[code];
+                                if ((flags & stopFlags) !== 0) {
+                                    stop = flags & COMMA_FLAG;
+                                    break;
+                                }
+                                index++;
+                            }
+                            if (stop !== 0)
+                                break parameter;
+                            continue parameter;
+                        }
+                        if (code === BSLASH && index + 1 < len) {
+                            escaped = true;
+                            index += 2;
+                            continue;
+                        }
+                        index++;
+                    }
+                    continue parameter;
+                }
+                const valueStart = index;
+                let stop = 0;
+                let valueWhitespace = -1;
+                while (index < len) {
+                    const code = header.charCodeAt(index);
+                    const flags = CHAR_MAP[code];
+                    if ((flags & stopFlags) !== 0) {
+                        stop = flags & COMMA_FLAG;
+                        break;
+                    }
+                    if ((flags & OWS) !== 0) {
+                        if (valueWhitespace === -1)
+                            valueWhitespace = index;
+                    }
+                    else {
+                        valueWhitespace = -1;
+                    }
+                    index++;
+                }
+                if (parameters[key] === undefined) {
+                    const valueEnd = valueWhitespace === -1 ? index : valueWhitespace;
+                    parameters[key] = header.slice(valueStart, valueEnd);
+                }
+                if (stop !== 0)
+                    break parameter;
+                continue parameter;
+            }
+            if ((flags & OWS) !== 0) {
+                if (keyWhitespace === -1)
+                    keyWhitespace = index;
+            }
+            else {
+                keyWhitespace = -1;
+            }
+            keyFlags |= (code & NON_ASCII) | flags;
+            index++;
+        }
+    }
+    return { type, index, parameters };
+}
+/**
+ * Remove backslashes from quoted pairs in a known-terminated quoted string body.
+ */
+function unescapeQuotedPairs(str, start, end) {
+    let result = "";
+    for (let index = start; index < end; index++) {
+        if (str.charCodeAt(index) === BSLASH) {
+            result += str.slice(start, index);
+            start = ++index;
+        }
+    }
+    return result + str.slice(start, end);
+}
 
 const intRegex = /^-?\d+$/;
 const noiseValue = /^-?\d+n+$/; // Noise - strings that match the custom format before being converted to it
@@ -76314,14 +78135,250 @@ const originalStringify = JSON.stringify;
 const originalParse = JSON.parse;
 const customFormat = /^-?\d+n$/;
 
-const bigIntsStringify = /([\[:])?"(-?\d+)n"($|([\\n]|\s)*(\s|[\\n])*[,\}\]])/g;
-const noiseStringify =
-  /([\[:])?("-?\d+n+)n("$|"([\\n]|\s)*(\s|[\\n])*[,\}\]])/g;
+const bigIntsStringify = /([\[:])?"(-?\d+)n"($|\s*[,\}\]])/g;
+const noiseStringify = /([\[:])?("-?\d+n+)n("$|"\s*[,\}\]])/g;
 
 /**
  * @typedef {(this: any, key: string | number | undefined, value: any) => any} Replacer
  * @typedef {(key: string | number | undefined, value: any, context?: { source: string }) => any} Reviver
  */
+
+/**
+ * Checks if a value is unstringifiable according to native JSON.stringify rules.
+ *
+ * @param {any} val The value to check.
+ * @returns {boolean} True if the value is undefined, a function, or a symbol.
+ */
+const isUnstringifiable = (val) =>
+  val === undefined || typeof val === "function" || typeof val === "symbol";
+
+/**
+ * Checks if a value is a native JSON.rawJSON object (Node.js 22+).
+ *
+ * @param {any} val The value to check.
+ * @returns {boolean} True if the value is a RawJSON instance.
+ */
+const isRawJSON = (val) =>
+  val !== null &&
+  typeof val === "object" &&
+  val.constructor &&
+  val.constructor.name === "RawJSON";
+
+/**
+ * Iteratively converts a JS value to a JSON string.
+ * Used as a fallback when the native JSON.stringify hits the Maximum Call Stack size.
+ * Fully compliant with JSON formatting (space), replacers, and toJSON behaviors.
+ *
+ * @param {any} rootValue The value to stringify.
+ * @param {Replacer | Array<string | number> | null} [replacer] User's custom replacer function.
+ * @param {string | number} [spaceParam] Indentation for pretty-printing.
+ * @returns {string | undefined} The generated JSON string.
+ */
+const stringifyIteratively = (rootValue, replacer, spaceParam) => {
+  let space = "";
+  const propertyList = Array.isArray(replacer)
+    ? new Set(replacer.map(String))
+    : null;
+
+  /**
+   * Prepares a value for stringification by resolving toJSON, handling BigInts,
+   * applying custom replacers, and unwrapping primitive objects.
+   *
+   * @param {object|Array} parent The parent object or array holding the value.
+   * @param {string} key The key associated with the value.
+   * @param {any} val The raw value to process.
+   * @returns {any} The processed value ready for stringification.
+   */
+  const prepareVal = (parent, key, val) => {
+    const isObject = val !== null && typeof val === "object";
+    const hasToJSON = isObject && typeof val.toJSON === "function";
+
+    if (hasToJSON) {
+      val = val.toJSON(key);
+    }
+
+    const isNoise = typeof val === "string" && noiseValue.test(val);
+
+    if (isNoise) return val + "n";
+
+    const isBigInt = typeof val === "bigint";
+
+    if (isBigInt) {
+      const supportsRawJSON = "rawJSON" in JSON;
+
+      if (supportsRawJSON) return JSON.rawJSON(val.toString());
+
+      return val.toString() + "n";
+    }
+
+    const isPostReplacerObject = val !== null && typeof val === "object";
+
+    if (isPostReplacerObject) {
+      const isPrimitiveWrapper =
+        val instanceof Number ||
+        val instanceof String ||
+        val instanceof Boolean;
+
+      if (isPrimitiveWrapper) {
+        val = val.valueOf();
+      }
+    }
+
+    return val;
+  };
+
+  const rootProcessed = prepareVal({ }, "", rootValue);
+
+  if (isUnstringifiable(rootProcessed)) {
+    return undefined;
+  }
+
+  const isRootPrimitive =
+    rootProcessed === null || typeof rootProcessed !== "object";
+  const isRootNativeRawJSON = isRawJSON(rootProcessed);
+
+  if (isRootPrimitive || isRootNativeRawJSON) {
+    return originalStringify(rootProcessed);
+  }
+
+  const chunks = [];
+
+  const stack = [
+    {
+      parent: { "": rootProcessed },
+      key: "",
+      val: rootProcessed,
+      isArray: Array.isArray(rootProcessed),
+      keys: Array.isArray(rootProcessed) ? null : Object.keys(rootProcessed),
+      index: 0,
+      first: true,
+    },
+  ];
+
+  const visited = new WeakSet([rootProcessed]);
+
+  while (stack.length > 0) {
+    const node = stack[stack.length - 1];
+
+    if (node.index === 0) {
+      chunks.push(node.isArray ? "[" : "{");
+    }
+
+    let isDone = false;
+
+    if (node.isArray) {
+      if (node.index < node.val.length) {
+        if (!node.first) chunks.push(",");
+
+        const childRaw = node.val[node.index];
+        const childVal = prepareVal(node.val, String(node.index), childRaw);
+
+        if (isUnstringifiable(childVal)) {
+          chunks.push("null");
+          node.first = false;
+          node.index++;
+        } else {
+          const isComplexObject =
+            childVal !== null && typeof childVal === "object";
+          const isNativeRaw = isRawJSON(childVal);
+
+          if (isComplexObject && !isNativeRaw) {
+            if (visited.has(childVal)) {
+              throw new TypeError("Converting circular structure to JSON");
+            }
+
+            visited.add(childVal);
+
+            stack.push({
+              parent: node.val,
+              key: String(node.index),
+              val: childVal,
+              isArray: Array.isArray(childVal),
+              keys: Array.isArray(childVal) ? null : Object.keys(childVal),
+              index: 0,
+              first: true,
+            });
+
+            node.first = false;
+            node.index++;
+          } else {
+            chunks.push(originalStringify(childVal));
+            node.first = false;
+            node.index++;
+          }
+        }
+      } else {
+        isDone = true;
+      }
+    } else {
+      while (node.index < node.keys.length) {
+        const k = node.keys[node.index++];
+
+        const isFilteredOutByArray = propertyList && !propertyList.has(k);
+
+        if (isFilteredOutByArray) continue;
+
+        const childRaw = node.val[k];
+        const childVal = prepareVal(node.val, k, childRaw);
+
+        if (isUnstringifiable(childVal)) continue;
+
+        if (!node.first) chunks.push(",");
+
+        {
+          chunks.push(originalStringify(k) + ":");
+        }
+
+        const isComplexObject =
+          childVal !== null && typeof childVal === "object";
+        const isNativeRaw = isRawJSON(childVal);
+
+        if (isComplexObject && !isNativeRaw) {
+          if (visited.has(childVal)) {
+            throw new TypeError("Converting circular structure to JSON");
+          }
+
+          visited.add(childVal);
+
+          stack.push({
+            parent: node.val,
+            key: k,
+            val: childVal,
+            isArray: Array.isArray(childVal),
+            keys: Array.isArray(childVal) ? null : Object.keys(childVal),
+            index: 0,
+            first: true,
+          });
+
+          node.first = false;
+
+          break; // Stop current loop level to process the newly pushed stack node
+        } else {
+          chunks.push(originalStringify(childVal));
+          node.first = false;
+        }
+      }
+
+      const isNodeFullyProcessed =
+        node.index >= node.keys.length && stack[stack.length - 1] === node;
+
+      if (isNodeFullyProcessed) {
+        isDone = true;
+      }
+    }
+
+    if (isDone) {
+
+      if (!node.first && space) ;
+
+      chunks.push(node.isArray ? "]" : "}");
+      visited.delete(node.val);
+      stack.pop();
+    }
+  }
+
+  return chunks.join("");
+};
 
 /**
  * Converts a JavaScript value to a JSON string.
@@ -76334,51 +78391,87 @@ const noiseStringify =
  *
  * @param {*} value The value to convert to a JSON string.
  * @param {Replacer | Array<string | number> | null} [replacer]
- *   A function that alters the behavior of the stringification process,
- *   or an array of strings/numbers to indicate properties to exclude.
+ * A function that alters the behavior of the stringification process,
+ * or an array of strings/numbers to indicate properties to exclude.
  * @param {string | number} [space]
- *   A string or number to specify indentation or pretty-printing.
+ * A string or number to specify indentation or pretty-printing.
  * @returns {string} The JSON string representation.
  */
 const JSONStringify = (value, replacer, space) => {
-  if ("rawJSON" in JSON) {
-    return originalStringify(
+  try {
+    const supportsRawJSON = "rawJSON" in JSON;
+
+    if (supportsRawJSON) {
+      return originalStringify(
+        value,
+        (key, val) => {
+          if (typeof val === "bigint") return JSON.rawJSON(val.toString());
+
+          const hasFunctionReplacer = typeof replacer === "function";
+
+          if (hasFunctionReplacer) ;
+
+          const isKeyInArrayReplacer =
+            Array.isArray(replacer) && replacer.includes(key);
+
+          if (isKeyInArrayReplacer) return val;
+
+          return val;
+        },
+        space,
+      );
+    }
+
+    if (!value) return originalStringify(value, replacer, space);
+
+    const convertedToCustomJSON = originalStringify(
       value,
-      (key, value) => {
-        if (typeof value === "bigint") return JSON.rawJSON(value.toString());
+      (key, val) => {
+        const isNoise = typeof val === "string" && noiseValue.test(val);
 
-        if (Array.isArray(replacer) && replacer.includes(key)) return value;
+        if (isNoise) return val.toString() + "n"; // Mark noise values with additional "n" to offset the deletion of one "n" during the processing
 
-        return value;
+        if (typeof val === "bigint") return val.toString() + "n";
+
+        const hasFunctionReplacer = typeof replacer === "function";
+
+        if (hasFunctionReplacer) ;
+
+        const isKeyInArrayReplacer =
+          Array.isArray(replacer) && replacer.includes(key);
+
+        if (isKeyInArrayReplacer) return val;
+
+        return val;
       },
       space,
     );
+
+    const processedJSON = convertedToCustomJSON.replace(
+      bigIntsStringify,
+      "$1$2$3",
+    ); // Delete one "n" off the end of every BigInt value
+
+    const denoisedJSON = processedJSON.replace(noiseStringify, "$1$2$3"); // Remove one "n" off the end of every noisy string
+
+    return denoisedJSON;
+  } catch (error) {
+    if (error instanceof RangeError) {
+      const convertedJSON = stringifyIteratively(value, replacer);
+
+      if (convertedJSON === undefined) return undefined;
+
+      const supportsRawJSON = "rawJSON" in JSON;
+
+      if (supportsRawJSON) return convertedJSON;
+
+      const processedJSON = convertedJSON.replace(bigIntsStringify, "$1$2$3");
+
+      return processedJSON.replace(noiseStringify, "$1$2$3");
+    }
+
+    throw error;
   }
-
-  if (!value) return originalStringify(value, replacer, space);
-
-  const convertedToCustomJSON = originalStringify(
-    value,
-    (key, value) => {
-      const isNoise = typeof value === "string" && noiseValue.test(value);
-
-      if (isNoise) return value.toString() + "n"; // Mark noise values with additional "n" to offset the deletion of one "n" during the processing
-
-      if (typeof value === "bigint") return value.toString() + "n";
-
-      if (Array.isArray(replacer) && replacer.includes(key)) return value;
-
-      return value;
-    },
-    space,
-  );
-  const processedJSON = convertedToCustomJSON.replace(
-    bigIntsStringify,
-    "$1$2$3",
-  ); // Delete one "n" off the end of every BigInt value
-  const denoisedJSON = processedJSON.replace(noiseStringify, "$1$2$3"); // Remove one "n" off the end of every noisy string
-
-  return denoisedJSON;
 };
 
 const featureCache = new Map();
@@ -76426,6 +78519,7 @@ const isContextSourceSupported = () => {
 const convertMarkedBigIntsReviver = (key, value, context, userReviver) => {
   const isCustomFormatBigInt =
     typeof value === "string" && customFormat.test(value);
+
   if (isCustomFormatBigInt) return BigInt(value.slice(0, -1));
 
   const isNoiseValue = typeof value === "string" && noiseValue.test(value);
@@ -76447,9 +78541,10 @@ const convertMarkedBigIntsReviver = (key, value, context, userReviver) => {
  */
 const JSONParseV2 = (text, reviver) => {
   return JSON.parse(text, (key, value, context) => {
-    const isBigNumber =
-      typeof value === "number" &&
-      (value > Number.MAX_SAFE_INTEGER || value < Number.MIN_SAFE_INTEGER);
+    const isNumber = typeof value === "number";
+    const isOutOfBounds =
+      value > Number.MAX_SAFE_INTEGER || value < Number.MIN_SAFE_INTEGER;
+    const isBigNumber = isNumber && isOutOfBounds;
     const isInt = context && intRegex.test(context.source);
     const isBigInt = isBigNumber && isInt;
 
@@ -76462,8 +78557,101 @@ const JSONParseV2 = (text, reviver) => {
 const MAX_INT = Number.MAX_SAFE_INTEGER.toString();
 const MAX_DIGITS = MAX_INT.length;
 const stringsOrLargeNumbers =
-  /"(?:\\.|[^"])*"|-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?/g;
+  /"(?:[^"\\]|\\.)*"|-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?/g;
 const noiseValueWithQuotes = /^"-?\d+n+"$/; // Noise - strings that match the custom format before being converted to it
+
+/**
+ * Iteratively traverses the parsed object bottom-up (post-order),
+ * emulating the native JSON.parse reviver behavior.
+ * This avoids Call Stack overflows (RangeError) on deeply nested structures.
+ *
+ * @param {any} parsed The natively parsed JSON object.
+ * @param {Reviver} [userReviver] User's custom reviver function.
+ * @returns {any} The fully processed object.
+ */
+const applyReviverIteratively = (parsed, userReviver) => {
+  const rootHolder = { "": parsed };
+  const stack = [{ parent: rootHolder, key: "", visited: false }];
+
+  while (stack.length > 0) {
+    const node = stack[stack.length - 1];
+
+    if (!node.visited) {
+      node.visited = true;
+
+      const value = node.parent[node.key];
+      const isComplexObject = value !== null && typeof value === "object";
+
+      if (isComplexObject) {
+        const keys = Object.keys(value);
+
+        for (let i = keys.length - 1; i >= 0; i--) {
+          stack.push({ parent: value, key: keys[i], visited: false });
+        }
+      }
+    } else {
+      const { parent, key } = node;
+      let value = parent[key];
+
+      if (typeof value === "string") {
+        const isCustomFormatBigInt = customFormat.test(value);
+
+        if (isCustomFormatBigInt) {
+          value = BigInt(value.slice(0, -1));
+        } else {
+          const isNoise = noiseValue.test(value);
+
+          if (isNoise) value = value.slice(0, -1);
+        }
+      }
+
+      const isDeleted = value === undefined;
+
+      if (isDeleted) {
+        delete parent[key];
+      } else {
+        parent[key] = value;
+      }
+
+      stack.pop();
+    }
+  }
+
+  return rootHolder[""];
+};
+
+/**
+ * Pre-processes the JSON string to mark large numbers with an 'n' suffix.
+ *
+ * @param {string} text The raw JSON string.
+ * @returns {string} The serialized string with marked BigInts.
+ */
+const serializeBigInts = (text) => {
+  return text.replace(
+    stringsOrLargeNumbers,
+    (match, digits, fractional, exponential) => {
+      const isString = match[0] === '"';
+      const isNoise = isString && noiseValueWithQuotes.test(match);
+
+      if (isNoise) return match.substring(0, match.length - 1) + 'n"'; // Mark noise values with additional "n" to offset the deletion of one "n" during the processing
+
+      const hasFractionalOrExponential = fractional || exponential;
+
+      // With a fixed number of digits, we can correctly use lexicographical comparison to do a numeric comparison
+      const isLessThanMaxSafeInt =
+        digits &&
+        (digits.length < MAX_DIGITS ||
+          (digits.length === MAX_DIGITS && digits <= MAX_INT));
+
+      const isStandardValue =
+        isString || hasFractionalOrExponential || isLessThanMaxSafeInt;
+
+      if (isStandardValue) return match;
+
+      return '"' + match + 'n"';
+    },
+  );
+};
 
 /**
  * Converts a JSON string into a JavaScript value.
@@ -76476,42 +78664,34 @@ const noiseValueWithQuotes = /^"-?\d+n+"$/; // Noise - strings that match the cu
  *
  * @param {string} text A valid JSON string.
  * @param {Reviver} [reviver]
- *   A function that transforms the results. This function is called for each member
- *   of the object. If a member contains nested objects, the nested objects are
- *   transformed before the parent object is.
+ * A function that transforms the results. This function is called for each member
+ * of the object. If a member contains nested objects, the nested objects are
+ * transformed before the parent object is.
  * @returns {any} The parsed JavaScript value.
  * @throws {SyntaxError} If text is not valid JSON.
  */
 const JSONParse = (text, reviver) => {
   if (!text) return originalParse(text, reviver);
 
-  if (isContextSourceSupported()) return JSONParseV2(text); // Shortcut to a faster (2x) and simpler version
+  try {
+    if (isContextSourceSupported()) return JSONParseV2(text, reviver); // Shortcut to a faster (2x) and simpler version
 
-  // Find and mark big numbers with "n"
-  const serializedData = text.replace(
-    stringsOrLargeNumbers,
-    (text, digits, fractional, exponential) => {
-      const isString = text[0] === '"';
-      const isNoise = isString && noiseValueWithQuotes.test(text);
+    // Find and mark big numbers with "n"
+    const serializedData = serializeBigInts(text);
 
-      if (isNoise) return text.substring(0, text.length - 1) + 'n"'; // Mark noise values with additional "n" to offset the deletion of one "n" during the processing
+    return originalParse(serializedData, (key, value, context) =>
+      convertMarkedBigIntsReviver(key, value, context, reviver),
+    );
+  } catch (error) {
+    if (error instanceof RangeError) {
+      const serializedData = serializeBigInts(text);
+      const parsed = originalParse(serializedData);
 
-      const isFractionalOrExponential = fractional || exponential;
-      const isLessThanMaxSafeInt =
-        digits &&
-        (digits.length < MAX_DIGITS ||
-          (digits.length === MAX_DIGITS && digits <= MAX_INT)); // With a fixed number of digits, we can correctly use lexicographical comparison to do a numeric comparison
+      return applyReviverIteratively(parsed);
+    }
 
-      if (isString || isFractionalOrExponential || isLessThanMaxSafeInt)
-        return text;
-
-      return '"' + text + 'n"';
-    },
-  );
-
-  return originalParse(serializedData, (key, value, context) =>
-    convertMarkedBigIntsReviver(key, value),
-  );
+    throw error;
+  }
 };
 
 class RequestError extends Error {
@@ -76556,7 +78736,7 @@ class RequestError extends Error {
 // pkg/dist-src/index.js
 
 // pkg/dist-src/version.js
-var VERSION$7 = "10.0.8";
+var VERSION$7 = "10.0.16";
 
 // pkg/dist-src/defaults.js
 var defaults_default = {
@@ -76678,7 +78858,7 @@ async function getResponseData(response) {
   if (!contentType) {
     return response.text().catch(noop$2);
   }
-  const mimetype = fastContentTypeParseExports.safeParse(contentType);
+  const mimetype = parse(contentType);
   if (isJSONResponse(mimetype)) {
     let text = "";
     try {
@@ -76687,7 +78867,10 @@ async function getResponseData(response) {
     } catch (err) {
       return text;
     }
-  } else if (mimetype.type.startsWith("text/") || mimetype.parameters.charset?.toLowerCase() === "utf-8") {
+  } else if (mimetype.type.startsWith("text/") || // `application/octet-stream` is the canonical "arbitrary binary" type
+  // (RFC 2046) and must never be decoded as text, even when the response
+  // carries a (misleading) `charset=utf-8` parameter — see #751.
+  mimetype.parameters.charset?.toLowerCase() === "utf-8" && mimetype.type !== "application/octet-stream") {
     return response.text().catch(noop$2);
   } else {
     return response.arrayBuffer().catch(
@@ -76706,9 +78889,10 @@ function toErrorMessage(data) {
   if (data instanceof ArrayBuffer) {
     return "Unknown error";
   }
-  if ("message" in data) {
-    const suffix = "documentation_url" in data ? ` - ${data.documentation_url}` : "";
-    return Array.isArray(data.errors) ? `${data.message}: ${data.errors.map((v) => JSON.stringify(v)).join(", ")}${suffix}` : `${data.message}${suffix}`;
+  if (typeof data === "object" && data !== null && "message" in data) {
+    const objectData = data;
+    const suffix = "documentation_url" in objectData ? ` - ${objectData.documentation_url}` : "";
+    return Array.isArray(objectData.errors) ? `${objectData.message}: ${objectData.errors.map((v) => JSON.stringify(v)).join(", ")}${suffix}` : `${objectData.message}${suffix}`;
   }
   return `Unknown error: ${JSON.stringify(data)}`;
 }
@@ -76765,6 +78949,9 @@ var GraphqlResponseError = class extends Error {
       Error.captureStackTrace(this, this.constructor);
     }
   }
+  request;
+  headers;
+  response;
   name = "GraphqlResponseError";
   errors;
   data;
@@ -76859,6 +79046,7 @@ function withCustomRequest(customRequest) {
     url: "/graphql"
   });
 }
+/* v8 ignore if -- @preserve */
 
 // pkg/dist-src/is-jwt.js
 var b64url = "(?:[a-zA-Z0-9_-]+)";
@@ -76913,7 +79101,7 @@ var createTokenAuth = function createTokenAuth2(token) {
   });
 };
 
-const VERSION$5 = "7.0.6";
+const VERSION$5 = "7.0.8";
 
 const noop$1 = () => {
 };
@@ -81519,18 +83707,13 @@ function throttling(octokit, octokitOptions) {
   if (typeof connection !== "undefined") {
     common.connection = connection;
   }
-  if (groups.global == null) {
-    createGroups(Bottleneck, common);
-  }
   const state = Object.assign(
     {
       clustering: connection != null,
       triggersNotification,
       fallbackSecondaryRateRetryAfter: 60,
       retryAfterBaseValue: 1e3,
-      retryLimiter: new Bottleneck(),
-      id,
-      ...groups
+      id
     },
     octokitOptions.throttle
   );
@@ -81547,65 +83730,84 @@ function throttling(octokit, octokitOptions) {
         })
     `);
   }
-  const events = {};
-  const emitter = new Bottleneck.Events(events);
-  events.on("secondary-limit", state.onSecondaryRateLimit);
-  events.on("rate-limit", state.onRateLimit);
-  events.on(
-    "error",
-    (e) => octokit.log.warn("Error in throttling-plugin limit handler", e)
-  );
-  state.retryLimiter.on("failed", async function(error, info) {
-    const [state2, request, options] = info.args;
-    const { pathname } = new URL(options.url, "http://github.test");
-    const shouldRetryGraphQL = pathname.startsWith("/graphql") && error.status !== 401;
-    if (!(shouldRetryGraphQL || error.status === 403 || error.status === 429)) {
+  let initialized = false;
+  const initializeBottleneck = () => {
+    if (initialized) {
       return;
     }
-    const retryCount = ~~request.retryCount;
-    request.retryCount = retryCount;
-    options.request.retryCount = retryCount;
-    const { wantRetry, retryAfter = 0 } = await (async function() {
-      if (/\bsecondary rate\b/i.test(error.message)) {
-        const retryAfter2 = Number(error.response.headers["retry-after"]) || state2.fallbackSecondaryRateRetryAfter;
-        const wantRetry2 = await emitter.trigger(
-          "secondary-limit",
-          retryAfter2,
-          options,
-          octokit,
-          retryCount
-        );
-        return { wantRetry: wantRetry2, retryAfter: retryAfter2 };
-      }
-      if (error.response.headers != null && error.response.headers["x-ratelimit-remaining"] === "0" || (error.response.data?.errors ?? []).some(
-        (error2) => error2.type === "RATE_LIMITED"
-      )) {
-        const rateLimitReset = new Date(
-          ~~error.response.headers["x-ratelimit-reset"] * 1e3
-        ).getTime();
-        const retryAfter2 = Math.max(
-          // Add one second so we retry _after_ the reset time
-          // https://docs.github.com/en/rest/overview/resources-in-the-rest-api?apiVersion=2022-11-28#exceeding-the-rate-limit
-          Math.ceil((rateLimitReset - Date.now()) / 1e3) + 1,
-          0
-        );
-        const wantRetry2 = await emitter.trigger(
-          "rate-limit",
-          retryAfter2,
-          options,
-          octokit,
-          retryCount
-        );
-        return { wantRetry: wantRetry2, retryAfter: retryAfter2 };
-      }
-      return {};
-    })();
-    if (wantRetry) {
-      request.retryCount++;
-      return retryAfter * state2.retryAfterBaseValue;
+    initialized = true;
+    if (groups.global == null) {
+      createGroups(Bottleneck, common);
     }
+    state.global = state.global ?? groups.global;
+    state.auth = state.auth ?? groups.auth;
+    state.search = state.search ?? groups.search;
+    state.write = state.write ?? groups.write;
+    state.notifications = state.notifications ?? groups.notifications;
+    state.retryLimiter = state.retryLimiter ?? new Bottleneck();
+    const events = {};
+    const emitter = new Bottleneck.Events(events);
+    events.on("secondary-limit", state.onSecondaryRateLimit);
+    events.on("rate-limit", state.onRateLimit);
+    events.on(
+      "error",
+      (e) => octokit.log.warn("Error in throttling-plugin limit handler", e)
+    );
+    state.retryLimiter.on("failed", async function(error, info) {
+      const [state2, request, options] = info.args;
+      const { pathname } = new URL(options.url, "http://github.test");
+      const shouldRetryGraphQL = pathname.startsWith("/graphql") && error.status !== 401;
+      if (!(shouldRetryGraphQL || error.status === 403 || error.status === 429)) {
+        return;
+      }
+      const retryCount = ~~request.retryCount;
+      request.retryCount = retryCount;
+      options.request.retryCount = retryCount;
+      const { wantRetry, retryAfter = 0 } = await (async function() {
+        if (/\bsecondary rate\b/i.test(error.message)) {
+          const retryAfter2 = Number(error.response.headers["retry-after"]) || state2.fallbackSecondaryRateRetryAfter;
+          const wantRetry2 = await emitter.trigger(
+            "secondary-limit",
+            retryAfter2,
+            options,
+            octokit,
+            retryCount
+          );
+          return { wantRetry: wantRetry2, retryAfter: retryAfter2 };
+        }
+        if (error.response.headers != null && error.response.headers["x-ratelimit-remaining"] === "0" || (error.response.data?.errors ?? []).some(
+          (error2) => error2.type === "RATE_LIMITED"
+        )) {
+          const rateLimitReset = new Date(
+            ~~error.response.headers["x-ratelimit-reset"] * 1e3
+          ).getTime();
+          const retryAfter2 = Math.max(
+            // Add one second so we retry _after_ the reset time
+            // https://docs.github.com/en/rest/overview/resources-in-the-rest-api?apiVersion=2022-11-28#exceeding-the-rate-limit
+            Math.ceil((rateLimitReset - Date.now()) / 1e3) + 1,
+            0
+          );
+          const wantRetry2 = await emitter.trigger(
+            "rate-limit",
+            retryAfter2,
+            options,
+            octokit,
+            retryCount
+          );
+          return { wantRetry: wantRetry2, retryAfter: retryAfter2 };
+        }
+        return {};
+      })();
+      if (wantRetry) {
+        request.retryCount++;
+        return retryAfter * state2.retryAfterBaseValue;
+      }
+    });
+  };
+  octokit.hook.wrap("request", (request, options) => {
+    initializeBottleneck();
+    return wrapRequest(state, request, options);
   });
-  octokit.hook.wrap("request", wrapRequest.bind(null, state));
   return {};
 }
 throttling.VERSION = VERSION$1;
@@ -82426,6 +84628,35 @@ function requireConstants () {
 	// the shortest version with a build 0.0.0+BUILD.
 	const MAX_SAFE_BUILD_LENGTH = MAX_LENGTH - 6;
 
+	// ECMAScript whitespace and line terminators matched by \s.
+	const WHITESPACE_CHARACTERS = [
+	  '\t',
+	  '\n',
+	  '\v',
+	  '\f',
+	  '\r',
+	  ' ',
+	  '\u00a0',
+	  '\u1680',
+	  '\u2000',
+	  '\u2001',
+	  '\u2002',
+	  '\u2003',
+	  '\u2004',
+	  '\u2005',
+	  '\u2006',
+	  '\u2007',
+	  '\u2008',
+	  '\u2009',
+	  '\u200a',
+	  '\u2028',
+	  '\u2029',
+	  '\u202f',
+	  '\u205f',
+	  '\u3000',
+	  '\ufeff',
+	];
+
 	const RELEASE_TYPES = [
 	  'major',
 	  'premajor',
@@ -82441,6 +84672,7 @@ function requireConstants () {
 	  MAX_SAFE_COMPONENT_LENGTH,
 	  MAX_SAFE_BUILD_LENGTH,
 	  MAX_SAFE_INTEGER,
+	  WHITESPACE_CHARACTERS,
 	  RELEASE_TYPES,
 	  SEMVER_SPEC_VERSION,
 	  FLAG_INCLUDE_PRERELEASE: 0b001,
@@ -83730,6 +85962,451 @@ function requireLrucache () {
 	return lrucache;
 }
 
+var trimComparatorWhitespace_1;
+var hasRequiredTrimComparatorWhitespace;
+
+function requireTrimComparatorWhitespace () {
+	if (hasRequiredTrimComparatorWhitespace) return trimComparatorWhitespace_1;
+	hasRequiredTrimComparatorWhitespace = 1;
+
+	// Reproduce safeRe[COMPARATORTRIM] replacement boundaries, not version
+	// validation. Each end-index finder returns an exclusive end, or its start
+	// on no match.
+	// Positions count from zero. An end of 3 means characters 0, 1, and 2 were read;
+	// range.slice(start, end) gives the matched text, not a converted number.
+	const {
+	  MAX_LENGTH,
+	  MAX_SAFE_BUILD_LENGTH,
+	  WHITESPACE_CHARACTERS,
+	} = requireConstants();
+
+	/**
+	 * Remembers the last two rows of digits so their characters need not be reread.
+	 * Positions start at -1 until a row has been found.
+	 *
+	 * @typedef {object} DigitRunCache
+	 * @property {number} start The first character of the most recently found row.
+	 * @property {number} end The position after that row's last character.
+	 * @property {number} previousStart The first character of the previous row.
+	 * @property {number} previousEnd The position after the previous row.
+	 */
+
+	// One entry per UTF-16 code unit keeps membership checks constant-time.
+	const whitespace = new Uint8Array(0x10000);
+	for (const char of WHITESPACE_CHARACTERS) {
+	  whitespace[char.charCodeAt(0)] = 1;
+	}
+
+	/**
+	 * Checks whether a character is whitespace, like a space, tab, or newline.
+	 * Looking past the end of the string returns false.
+	 *
+	 * @param {string|undefined} char One character, or undefined past the string's end.
+	 * @returns {boolean} Whether the character is whitespace.
+	 * @example isWhitespace(' ') // true
+	 * @example isWhitespace('1') // false
+	 */
+	const isWhitespace = char =>
+	  char !== undefined && whitespace[char.charCodeAt(0)] === 1;
+
+	/**
+	 * Checks for v, =, or whitespace before the version number.
+	 * These are historical version prefixes, not range operators:
+	 * < and > are handled separately, as are tilde and caret ranges.
+	 *
+	 * @param {string|undefined} char One character to check.
+	 * @returns {boolean} Whether the character can belong to a version prefix.
+	 * @example isVersionPrefix('=') // true
+	 * @example isVersionPrefix('>') // false
+	 */
+	const isVersionPrefix = char =>
+	  char === 'v' ||
+	  char === '=' ||
+	  isWhitespace(char);
+
+	/**
+	 * Checks whether a character is one of the digits 0 through 9.
+	 *
+	 * @param {string|undefined} char One character to check.
+	 * @returns {boolean} Whether the character is an ASCII digit.
+	 * @example isDigit('7') // true
+	 * @example isDigit('.') // false
+	 */
+	const isDigit = char => char !== undefined && char >= '0' && char <= '9';
+
+	/**
+	 * Checks whether a character is an English letter, uppercase or lowercase.
+	 *
+	 * @param {string|undefined} char One character to check.
+	 * @returns {boolean} Whether the character is an ASCII letter.
+	 * @example isLetter('b') // true
+	 * @example isLetter('7') // false
+	 */
+	const isLetter = char =>
+	  char !== undefined && (
+	    (char >= 'a' && char <= 'z') ||
+	    (char >= 'A' && char <= 'Z')
+	  );
+
+	/**
+	 * Checks for a letter, digit, or hyphen: the characters allowed inside
+	 * prerelease and build names such as beta-1.
+	 *
+	 * @param {string|undefined} char One character to check.
+	 * @returns {boolean} Whether the character can be part of an identifier.
+	 * @example isIdentifierCharacter('-') // true
+	 * @example isIdentifierCharacter('.') // false; dots separate identifiers
+	 */
+	const isIdentifierCharacter = char => isDigit(char) || isLetter(char) || char === '-';
+
+	/**
+	 * Checks whether a version component can begin here: with a digit or
+	 * a wildcard such as x, X, or *.
+	 *
+	 * @param {string|undefined} char One character to check.
+	 * @returns {boolean} Whether a number or wildcard can start with this character.
+	 * @example isVersionStart('x') // true
+	 * @example isVersionStart('v') // false; v belongs to the prefix
+	 */
+	const isVersionStart = char =>
+	  isDigit(char) ||
+	  char === 'x' ||
+	  char === 'X' ||
+	  char === '*';
+
+	/**
+	 * Finds the end of a row of digits, but returns no more than limit digits.
+	 * Remembers the last two rows so looking at them again does not reread them.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position of the first character to check.
+	 * @param {number} limit The most digit characters the returned match can include.
+	 * @param {DigitRunCache} digitRuns Shared cache of digit-run positions, updated in place.
+	 * @returns {number} The position after the matched digits, or start if none match.
+	 * @example findDigitsEndIndex('123abc', 0, 10, digitRuns) // 3, pointing at a
+	 * @example findDigitsEndIndex('123abc', 0, 2, digitRuns) // 2, pointing at the unread 3
+	 */
+	const findDigitsEndIndex = (range, start, limit, digitRuns) => {
+	  if (!isDigit(range[start])) {
+	    return start
+	  }
+	  if (start >= digitRuns.start && start < digitRuns.end) {
+	    return Math.min(start + limit, digitRuns.end)
+	  }
+	  if (start >= digitRuns.previousStart && start < digitRuns.previousEnd) {
+	    return Math.min(start + limit, digitRuns.previousEnd)
+	  }
+	  let end = start + 1;
+	  while (isDigit(range[end])) {
+	    end++;
+	  }
+	  // A failed full version can rewind from its second run to its first.
+	  digitRuns.previousStart = digitRuns.start;
+	  digitRuns.previousEnd = digitRuns.end;
+	  digitRuns.start = start;
+	  digitRuns.end = end;
+	  return Math.min(start + limit, end)
+	};
+
+	/**
+	 * Reads a number using the old regex's length and leading-zero rules.
+	 * Strict mode reads just the first zero in 012; loose mode can read all three.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position where the number should begin.
+	 * @param {boolean} loose Whether to allow leading zeros.
+	 * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+	 * @returns {number} The position after the matched digits, not their numeric value.
+	 * @example findVersionNumberEndIndex('012', 0, false, digitRuns) // 1
+	 * @example findVersionNumberEndIndex('012', 0, true, digitRuns) // 3
+	 */
+	const findVersionNumberEndIndex = (range, start, loose, digitRuns) => {
+	  if (!loose && range[start] === '0') {
+	    return start + 1
+	  }
+	  // Strict syntax allows an initial nonzero digit plus MAX_LENGTH digits.
+	  return findDigitsEndIndex(range, start, loose ? MAX_LENGTH : MAX_LENGTH + 1, digitRuns)
+	};
+
+	/**
+	 * Reads one piece of a prerelease name, such as beta or 1 in beta.1.
+	 * Tries the letter-or-hyphen form first, then the number-only form.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position where the identifier should begin.
+	 * @param {boolean} loose Whether numeric identifiers may have leading zeros.
+	 * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+	 * @returns {number} The position after the identifier, or start if none matches.
+	 * @example findPrereleaseIdentifierEndIndex('beta.1', 0, false, digitRuns) // 4, at the dot
+	 * @example findPrereleaseIdentifierEndIndex('001beta', 0, false, digitRuns) // 7
+	 */
+	const findPrereleaseIdentifierEndIndex = (range, start, loose, digitRuns) => {
+	  const digitsEnd = findDigitsEndIndex(range, start, MAX_LENGTH, digitRuns);
+	  // The legacy regex tries a nonnumeric identifier before a numeric one.
+	  if (isLetter(range[digitsEnd]) || range[digitsEnd] === '-') {
+	    let end = digitsEnd + 1;
+	    const limit = end + MAX_SAFE_BUILD_LENGTH;
+	    while (end < limit && isIdentifierCharacter(range[end])) {
+	      end++;
+	    }
+	    return end
+	  }
+	  return findVersionNumberEndIndex(range, start, loose, digitRuns)
+	};
+
+	/**
+	 * Reads a prerelease suffix such as -beta.1, one dot-separated piece at a time.
+	 * Loose mode also allows the name without its opening hyphen.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position where the suffix should begin, including -.
+	 * @param {boolean} loose Whether the opening hyphen is optional and zeros allowed.
+	 * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+	 * @returns {number} The position after the matched suffix, or start if absent.
+	 * @example findPrereleaseEndIndex('-beta.1+sha', 0, false, digitRuns) // 7, at the plus
+	 * @example findPrereleaseEndIndex('beta', 0, false, digitRuns) // 0; no opening hyphen
+	 */
+	const findPrereleaseEndIndex = (range, start, loose, digitRuns) => {
+	  const hyphen = range[start] === '-';
+	  if (!loose && !hyphen) {
+	    return start
+	  }
+	  const identifierStart = start + (hyphen ? 1 : 0);
+	  let end = findPrereleaseIdentifierEndIndex(range, identifierStart, loose, digitRuns);
+	  if (end === identifierStart) {
+	    if (!loose || !hyphen) {
+	      return start
+	    }
+	    // In loose syntax, a lone hyphen can itself be the identifier.
+	    end = findPrereleaseIdentifierEndIndex(range, start, loose, digitRuns);
+	  }
+	  while (range[end] === '.') {
+	    const next = findPrereleaseIdentifierEndIndex(range, end + 1, loose, digitRuns);
+	    if (next === end + 1) {
+	      break
+	    }
+	    end = next;
+	  }
+	  return end
+	};
+
+	/**
+	 * Reads one build-name piece, such as sha or 123 in +sha.123.
+	 * Stops at a disallowed character or the old regex's length limit.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position where the identifier should begin.
+	 * @returns {number} The position after the identifier, or start if none matches.
+	 * @example findBuildIdentifierEndIndex('sha.123', 0) // 3, at the dot
+	 * @example findBuildIdentifierEndIndex('001', 0) // 3; leading zeros are allowed
+	 */
+	const findBuildIdentifierEndIndex = (range, start) => {
+	  let end = start;
+	  while (end - start < MAX_SAFE_BUILD_LENGTH && isIdentifierCharacter(range[end])) {
+	    end++;
+	  }
+	  return end
+	};
+
+	/**
+	 * Reads optional build metadata such as +sha.123.
+	 * Leaves the position unchanged if there is no plus sign followed by a name.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position where the opening + should be.
+	 * @returns {number} The position after the matched metadata, or start if absent.
+	 * @example findBuildEndIndex('+sha.123 <2', 0) // 8, at the space
+	 * @example findBuildEndIndex('+', 0) // 0; a plus sign alone is not a match
+	 */
+	const findBuildEndIndex = (range, start) => {
+	  if (range[start] !== '+') {
+	    return start
+	  }
+	  let end = findBuildIdentifierEndIndex(range, start + 1);
+	  if (end === start + 1) {
+	    return start
+	  }
+	  while (range[end] === '.') {
+	    const next = findBuildIdentifierEndIndex(range, end + 1);
+	    if (next === end + 1) {
+	      break
+	    }
+	    end = next;
+	  }
+	  return end
+	};
+
+	/**
+	 * Reads three numbers separated by dots, then any prerelease and build suffixes.
+	 * Uses loose rules, so forms such as 01.02.03beta can match here.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position of the first number, after any prefix.
+	 * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+	 * @returns {number} The position after the version match, or start if none matches.
+	 * @example findLooseFullVersionEndIndex('1.2.3-beta+sha <2', 0, digitRuns) // 14
+	 * @example findLooseFullVersionEndIndex('1.2', 0, digitRuns) // 0; needs three numbers
+	 */
+	const findLooseFullVersionEndIndex = (range, start, digitRuns) => {
+	  let end = start;
+	  for (let component = 0; component < 3; component++) {
+	    const next = findVersionNumberEndIndex(range, end, true, digitRuns);
+	    if (next === end) {
+	      return start
+	    }
+	    end = next;
+	    if (component < 2) {
+	      if (range[end] !== '.') {
+	        return start
+	      }
+	      end++;
+	    }
+	  }
+	  const prereleaseEnd = findPrereleaseEndIndex(range, end, true, digitRuns);
+	  return findBuildEndIndex(range, prereleaseEnd)
+	};
+
+	/**
+	 * Reads one component of a partial or wildcard version, such as 2 or x in 2.x.
+	 * Numbers use strict leading-zero rules; wildcards take up one character.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position where the component should begin.
+	 * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+	 * @returns {number} The position after the component, or start if none matches.
+	 * @example findPartialVersionComponentEndIndex('2.x', 0, digitRuns) // 1, at the dot
+	 * @example findPartialVersionComponentEndIndex('2.x', 2, digitRuns) // 3, after x
+	 */
+	const findPartialVersionComponentEndIndex = (range, start, digitRuns) => {
+	  if (isDigit(range[start])) {
+	    return findVersionNumberEndIndex(range, start, false, digitRuns)
+	  }
+	  return isVersionStart(range[start]) ? start + 1 : start
+	};
+
+	/**
+	 * Reads up to three components, allowing forms such as 1, 1.2, or 1.x.
+	 * After the third component, also reads any strict prerelease and build suffixes.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position of a number or wildcard, after any prefix.
+	 * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+	 * @returns {number} The position after the matched version text.
+	 * @example findPartialVersionEndIndex('1.x <2', 0, digitRuns) // 3, at the space
+	 * @example findPartialVersionEndIndex('1.', 0, digitRuns) // 1; the trailing dot is unread
+	 */
+	const findPartialVersionEndIndex = (range, start, digitRuns) => {
+	  let end = findPartialVersionComponentEndIndex(range, start, digitRuns);
+	  for (let component = 0; component < 2; component++) {
+	    if (range[end] !== '.') {
+	      return end
+	    }
+	    const next = findPartialVersionComponentEndIndex(range, end + 1, digitRuns);
+	    if (next === end + 1) {
+	      return end
+	    }
+	    end = next;
+	  }
+	  const prereleaseEnd = findPrereleaseEndIndex(range, end, false, digitRuns);
+	  return findBuildEndIndex(range, prereleaseEnd)
+	};
+
+	/**
+	 * Finds where a version match ends, without deciding whether the range is valid.
+	 * Tries a loose full version first, then a partial or wildcard version, just
+	 * like the old regex's LOOSEPLAIN and XRANGEPLAIN alternatives.
+	 *
+	 * @param {string} range The text to read; it is not changed.
+	 * @param {number} start The position of a number or wildcard, after any prefix.
+	 * @param {DigitRunCache} digitRuns Shared digit-run cache, updated as needed.
+	 * @returns {number} The position where scanning the next candidate can resume.
+	 * @example findVersionEndIndex('1.2.3 <2', 0, digitRuns) // 5, at the space
+	 * @example findVersionEndIndex('1.x <2', 0, digitRuns) // 3, at the space
+	 */
+	const findVersionEndIndex = (range, start, digitRuns) => {
+	  const fullVersionEnd = findLooseFullVersionEndIndex(range, start, digitRuns);
+	  return fullVersionEnd !== start
+	    ? fullVersionEnd
+	    : findPartialVersionEndIndex(range, start, digitRuns)
+	};
+
+	/**
+	 * Finds the one whitespace character the old replacement would remove.
+	 * Keeps leading whitespace, skips an optional operator, and checks immediately
+	 * after it. Returns -1 if there is nothing to remove.
+	 *
+	 * @param {string} range The text containing a candidate already found by the caller.
+	 * @param {number} matchStart The candidate's position, including leading whitespace.
+	 * @returns {number} The position of the removable whitespace, or -1 if absent.
+	 * @example findRemovableWhitespaceIndex(' > 1', 0) // 2; keep the space at position 0
+	 * @example findRemovableWhitespaceIndex('>1', 0) // -1
+	 */
+	const findRemovableWhitespaceIndex = (range, matchStart) => {
+	  let position = matchStart;
+	  if (isWhitespace(range[position])) {
+	    position++;
+	  }
+	  if (range[position] === '<' || range[position] === '>') {
+	    position++;
+	  }
+	  if (range[position] === '=') {
+	    position++;
+	  }
+	  return isWhitespace(range[position]) ? position : -1
+	};
+
+	/**
+	 * Joins an operator to its version, turning > 1.2.3 into >1.2.3.
+	 * Copies everything else according to the old regex's matching rules.
+	 * Moves forward through prefixes and whole versions to avoid repeatedly
+	 * searching the same characters on long inputs.
+	 *
+	 * @param {string} range The range text to process; the original string is unchanged.
+	 * @returns {string} The range with matched operator whitespace removed.
+	 * @example trimComparatorWhitespace('> 1.2.3 < 2') // '>1.2.3 <2'
+	 * @example trimComparatorWhitespace('> invalid') // '> invalid'
+	 */
+	const trimComparatorWhitespace = range => {
+	  let result = '';
+	  let copyFrom = 0;
+	  let cursor = 0;
+	  const digitRuns = { start: -1, end: -1, previousStart: -1, previousEnd: -1 };
+
+	  while (cursor < range.length) {
+	    const matchStart = cursor;
+	    if (range[cursor] === '<' || range[cursor] === '>') {
+	      cursor++;
+	    } else if (!isVersionPrefix(range[cursor]) && !isVersionStart(range[cursor])) {
+	      cursor++;
+	      continue
+	    }
+
+	    // Consume a v/=/whitespace run once, even when no version follows it.
+	    while (cursor < range.length && isVersionPrefix(range[cursor])) {
+	      cursor++;
+	    }
+	    if (!isVersionStart(range[cursor])) {
+	      continue
+	    }
+
+	    const whitespacePosition = findRemovableWhitespaceIndex(range, matchStart);
+	    if (whitespacePosition !== -1) {
+	      result += range.slice(copyFrom, whitespacePosition);
+	      copyFrom = whitespacePosition + 1;
+	    }
+
+	    // Skip the entire match, so a prerelease's trailing v cannot be
+	    // reconsidered as the prefix of another version.
+	    cursor = findVersionEndIndex(range, cursor, digitRuns);
+	  }
+
+	  return result + range.slice(copyFrom)
+	};
+
+	trimComparatorWhitespace_1 = trimComparatorWhitespace;
+	return trimComparatorWhitespace_1;
+}
+
 var range;
 var hasRequiredRange;
 
@@ -83856,7 +86533,7 @@ function requireRange () {
 	    debug('hyphen replace', range);
 
 	    // `> 1.2.3 < 1.2.5` => `>1.2.3 <1.2.5`
-	    range = range.replace(re[t.COMPARATORTRIM], comparatorTrimReplace);
+	    range = trimComparatorWhitespace(range);
 	    debug('comparator trim', range);
 
 	    // `~ 1.2.3` => `~1.2.3`
@@ -83961,11 +86638,11 @@ function requireRange () {
 	const Comparator = requireComparator();
 	const debug = requireDebug();
 	const SemVer = requireSemver$1();
+	const trimComparatorWhitespace = requireTrimComparatorWhitespace();
 	const {
 	  safeRe: re,
 	  src,
 	  t,
-	  comparatorTrimReplace,
 	  tildeTrimReplace,
 	  caretTrimReplace,
 	} = requireRe();
@@ -85326,8 +88003,9 @@ class SemverVersioner {
         else {
             for (const commit of commits) {
                 const title = commit.title || '';
+                const parsed = parseCommit(commit);
                 // Breaking changes: any type with ! or BREAKING CHANGE: in message footer
-                if (/^\w+(?:\([^)]+\))?!:/.test(title) || /^BREAKING CHANGE:/m.test(commit.message || '')) {
+                if (parsed?.breaking) {
                     priority = 3;
                     break;
                 }
@@ -85345,9 +88023,8 @@ class SemverVersioner {
                 if (/^chore(?:\([^)]+\))?:/.test(title)) { // TODO : should chores really not bump at all? or only in prerelease?
                     priority = Math.max(priority, 0);
                     // Set forceVersion if we have a chore with a version in the message body like Release-As: v1.2.3 (similar to how we do it for PR labels) - this allows us to support chore-only releases and manually forcing versions when needed
-                    const releaseAsMatch = /Release-As:\s*(\S+)/i.exec(commit.message || '');
-                    if (releaseAsMatch) {
-                        forceVersion = releaseAsMatch[1].trim();
+                    if (parsed?.releaseAs) {
+                        forceVersion = parsed.releaseAs;
                     }
                     continue;
                 }
@@ -85413,6 +88090,9 @@ async function loadConfig(cliArgs = { prerelease: false, dryRun: false }, provid
     const targetBranch = cliArgs.targetBranch || defaultBranch;
     // Load unified config file — try target branch first, fall back to default branch
     const fileConfig = await loadConfigFile(provider, targetBranch, defaultBranch);
+    if (fileConfig.includeDescription !== undefined && typeof fileConfig.includeDescription !== 'boolean') {
+        throw new Error('Invalid includeDescription in config: expected a boolean.');
+    }
     // Create versioner instance
     const versionerType = cliArgs.versioner || 'semver';
     const versionPrefix = cliArgs.versionPrefix ?? fileConfig.versionPrefix ?? 'v';
@@ -85442,6 +88122,7 @@ async function loadConfig(cliArgs = { prerelease: false, dryRun: false }, provid
         version,
         versionPrefix,
         issueUrlTemplate: cliArgs.issueUrlTemplate ?? fileConfig.issueUrlTemplate,
+        includeDescription: fileConfig.includeDescription ?? false,
         manifests,
         dryRun: cliArgs.dryRun || fileConfig.dryRun || process.env.ARP_DRY_RUN === 'true' || false,
         debug: cliArgs.debug || process.env.ARP_DEBUG === 'true' || false,
@@ -85498,6 +88179,9 @@ async function loadConfigFile(provider, targetBranch, defaultBranch) {
  * Load release configuration
  */
 function loadReleaseConfig(cliArgs, fileConfig) {
+    if (fileConfig.release?.alwaysCreatePr !== undefined && typeof fileConfig.release.alwaysCreatePr !== 'boolean') {
+        throw new Error('Invalid release.alwaysCreatePr in config: expected a boolean.');
+    }
     return {
         prerelease: cliArgs.prerelease ?? fileConfig.release?.prerelease ?? false,
         targetBranch: cliArgs.targetBranch || fileConfig.release?.targetBranch,
@@ -85507,6 +88191,7 @@ function loadReleaseConfig(cliArgs, fileConfig) {
         maxReleases: cliArgs.maxReleases ?? fileConfig.release?.maxReleases ?? 10,
         maxCommits: cliArgs.maxCommits ?? fileConfig.release?.maxCommits ?? 100,
         includeChores: cliArgs.includeChores ?? fileConfig.release?.includeChores ?? false,
+        alwaysCreatePr: fileConfig.release?.alwaysCreatePr ?? false,
         skipTag: cliArgs.skipTag ?? fileConfig.release?.skipTag ?? false,
         skipRelease: cliArgs.skipRelease ?? fileConfig.release?.skipRelease ?? false,
         skipPrCreation: cliArgs.skipPrCreation ?? fileConfig.release?.skipPrCreation ?? false,
