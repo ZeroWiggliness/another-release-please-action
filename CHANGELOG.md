@@ -1,3 +1,14 @@
+## v0.2.4
+
+### Bug Fixes
+* *(dep)* Bump @rollup/rollup-linux-x64-gnu from 4.62.2 to 4.68.2 ([#51](https://github.com/ZeroWiggliness/another-release-please-action/issues/51)) ([7913f89](https://github.com/ZeroWiggliness/another-release-please-action/commit/7913f89e0273b240eba3b473be9bc8ce1836ab85))
+* *(dep)* Bump the npm-development group across 1 directory with 10 updates ([#45](https://github.com/ZeroWiggliness/another-release-please-action/issues/45)) ([68fb744](https://github.com/ZeroWiggliness/another-release-please-action/commit/68fb744b20cac46ddd1491271215ff6f80ff88e1))
+* *(dep)* Bump the npm-development group across 1 directory with 8 updates ([#53](https://github.com/ZeroWiggliness/another-release-please-action/issues/53)) ([45efe03](https://github.com/ZeroWiggliness/another-release-please-action/commit/45efe03928fe844cf7d8747eaa1bfff8d8adeec1))
+* *(dep)* update another-release-please to 0.2.1 ([#54](https://github.com/ZeroWiggliness/another-release-please-action/issues/54)) ([3baee77](https://github.com/ZeroWiggliness/another-release-please-action/commit/3baee774271ca0afde76598c34db93d76bcb24e6))
+
+---
+_Generated on 2026-11-17_
+
 ## v0.2.3
 
 ### Bug Fixes
