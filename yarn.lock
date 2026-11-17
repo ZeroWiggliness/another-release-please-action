@@ -2687,6 +2687,22 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@simple-git/args-pathspec@npm:1.0.4, @simple-git/args-pathspec@npm:^1.0.4":
+  version: 1.0.4
+  resolution: "@simple-git/args-pathspec@npm:1.0.4"
+  checksum: 10c0/f62c09daf6a17734b2a13a186421bf0fdbdbd48782d1ca6d751027b2a9f515f11505da672489609f95335a0541d2fcf6d6fd6c2754919245109e92335e437b1b7b
+  languageName: node
+  linkType: hard
+
+"@simple-git/argv-parser@npm:2.0.1":
+  version: 2.0.1
+  resolution: "@simple-git/argv-parser@npm:2.0.1"
+  dependencies:
+    "@simple-git/args-pathspec": "npm:^1.0.4"
+  checksum: 10c0/7d2cd9852139ca3b524dcd91f6a887fa505cfb68c8813d7b849005566147365bb1e34f5450411c494fbd714a80c123058e65dc2ffc0b41d059e30bdc98e122238a1a
+  languageName: node
+  linkType: hard
+
 "@simple-git/argv-parser@npm:^1.1.0":
   version: 1.1.0
   resolution: "@simple-git/argv-parser@npm:1.1.0"
@@ -3363,20 +3379,19 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@zerowiggliness/another-release-please@npm:^0.1.5":
-  version: 0.1.5
-  resolution: "@zerowiggliness/another-release-please@npm:0.1.5::__archiveUrl=https%3A%2F%2Fnpm.pkg.github.com%2Fdownload%2F%40zerowiggliness%2Fanother-release-please%2F0.1.5%2Ff6a0be81f20eda3a5917545aff2d711e1d41db30"
+"@zerowiggliness/another-release-please@npm:^0.2.0":
+  version: 0.2.0
+  resolution: "@zerowiggliness/another-release-please@npm:0.2.0"
   dependencies:
     "@gitbeaker/node": "npm:^35.8.1"
     handlebars: "npm:^4.7.9"
     minimatch: "npm:^10.2.5"
     octokit: "npm:^5.0.5"
     semver: "npm:^7.8.5"
-    simple-git: "npm:^3.36.0"
-    yaml: "npm:^2.8.3"
+    simple-git: "npm:^4.0.2"
+    yaml: "npm:^2.9.1"
   bin:
     arp: dist/bin/arp.js
-  checksum: 10c0/4e65abadc7b9bc228013ddf8a19051da2d99bdfe3af6c1d5e9cbff1908db76150503235e824d7c3ce193e3021fb9aa8c4b51d83f369f9c1856ef14a9a79d1fbf
   languageName: node
   linkType: hard
 
@@ -7557,16 +7572,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"simple-git@npm:^3.36.0":
-  version: 3.36.0
-  resolution: "simple-git@npm:3.36.0"
+"simple-git@npm:^3.36.0, simple-git@npm:^4.0.2":
+  version: 4.0.2
+  resolution: "simple-git@npm:4.0.2"
   dependencies:
     "@kwsites/file-exists": "npm:^1.1.1"
     "@kwsites/promise-deferred": "npm:^1.1.1"
-    "@simple-git/args-pathspec": "npm:^1.0.3"
-    "@simple-git/argv-parser": "npm:^1.1.0"
+    "@simple-git/args-pathspec": "npm:1.0.4"
+    "@simple-git/argv-parser": "npm:2.0.1"
     debug: "npm:^4.4.0"
-  checksum: 10c0/4c22e57107535168f354e5abbbf6e618a7b39d76491ca225c70588520fbe86891f3b9a5c4f8a3fc0137e669aad2f0e11f6c6e677bfec07169cd18f29bf23cb77
+  checksum: 10c0/d028927258fa286d9d8e462f29ec6a37a32398acd7e53cef7fc81e70636c149d7359a542d1a4f8490b342d40d98e341c35c718734aec448fc24fdee88566e981
   languageName: node
   linkType: hard
 
@@ -8058,7 +8073,7 @@ __metadata:
     "@types/node": "npm:^26.6.3"
     "@typescript-eslint/eslint-plugin": "npm:^8.72.2"
     "@typescript-eslint/parser": "npm:^8.72.2"
-    "@zerowiggliness/another-release-please": "npm:^0.1.5"
+    "@zerowiggliness/another-release-please": "npm:^0.2.0"
     eslint: "npm:^10.14.0"
     eslint-config-prettier: "npm:^10.1.8"
     eslint-plugin-jest: "npm:^29.17.0"
@@ -8466,12 +8481,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"yaml@npm:^2.8.2, yaml@npm:^2.8.3":
-  version: 2.8.3
-  resolution: "yaml@npm:2.8.3"
+"yaml@npm:^2.8.2, yaml@npm:^2.8.3, yaml@npm:^2.9.1":
+  version: 2.9.1
+  resolution: "yaml@npm:2.9.1"
   bin:
     yaml: bin.mjs
-  checksum: 10c0/ddff0e11c1b467728d7eb4633db61c5f5de3d8e9373cf84d08fb0cdee03e1f58f02b9f1c51a4a8a865751695addbd465a77f73f1079be91fe5493b29c305fd77
+  checksum: 10c0/9d06676ef02b89559a8b10a71882bd2cdae81e8393dc8dbc871615c3259475d9609ad973d19cb3c9e71e72d6206e3d1e7aa241c7e55f3d16fd2e77db305827d6
   languageName: node
   linkType: hard
 
