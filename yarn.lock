@@ -6700,7 +6700,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"minimatch@npm:^11.0.1, minimatch@npm:^11.0.5":
+"minimatch@npm:^11.0.1, minimatch@npm:^11.0.5, minimatch@npm:^11.0.9":
   version: 11.0.9
   resolution: "minimatch@npm:11.0.9"
   dependencies:
@@ -8321,7 +8321,7 @@ __metadata:
     globals: "npm:^17.14.0"
     jest: "npm:^30.5.2"
     make-coverage-badge: "npm:^1.2.0"
-    minimatch: "npm:^10.2.5"
+    minimatch: "npm:^11.0.9"
     prettier: "npm:^3.10.1"
     rimraf: "npm:^6.1.4"
     rollup: "npm:^4.68.2"
